@@ -10,23 +10,21 @@ import java.io.File;
 import java.io.FileReader;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 public class PrologToGraphDB {
 
     /**
      * Looks through the GraphDB for an Artifact with this name. Returns the needed Artifact node, and creates it if not found.
-     *
-     * @param driver GraphDB driver
-     * @param name   Artifact name
-     * @return Artifact to find (already existing or newly created)
      */
     private static Record getArtifact(Driver driver, String name) {
-        var result = driver.executableQuery("MATCH (p:Artifact {name: " + name + "}) RETURN p")
+        // CORRECTION: Ajouter des quotes autour du nom dans la requête
+        var result = driver.executableQuery("MATCH (p:Artifact {name: '" + name + "'}) RETURN p")
                 .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                 .execute();
 
         if (result.records().isEmpty()) {
-            result = driver.executableQuery("CREATE (p:Artifact {name: " + name + "}) RETURN p")
+            result = driver.executableQuery("CREATE (p:Artifact {name: '" + name + "'}) RETURN p")
                     .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                     .execute();
         }
@@ -36,18 +34,15 @@ public class PrologToGraphDB {
 
     /**
      * Looks through the GraphDB for a Process with this name. Returns the needed Process node, and creates it if not found.
-     *
-     * @param driver GraphDB driver
-     * @param name   Process name
-     * @return Process to find (already existing or newly created)
      */
     private static Record getProcess(Driver driver, String name) {
-        var result = driver.executableQuery("MATCH (p:Process {name: " + name + "}) RETURN p")
+        // CORRECTION: Ajouter des quotes autour du nom dans la requête
+        var result = driver.executableQuery("MATCH (p:Process {name: '" + name + "'}) RETURN p")
                 .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                 .execute();
 
         if (result.records().isEmpty()) {
-            result = driver.executableQuery("CREATE (p:Process {name: " + name + "}) RETURN p")
+            result = driver.executableQuery("CREATE (p:Process {name: '" + name + "'}) RETURN p")
                     .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                     .execute();
         }
@@ -57,18 +52,15 @@ public class PrologToGraphDB {
 
     /**
      * Looks through the GraphDB for an Agent with this name. Returns the needed Agent node, and creates it if not found.
-     *
-     * @param driver GraphDB driver
-     * @param name   Agent name
-     * @return Agent to find (already existing or newly created)
      */
     private static Record getAgent(Driver driver, String name) {
-        var result = driver.executableQuery("MATCH (p:Agent {name: " + name + "}) RETURN p")
+        // CORRECTION: Ajouter des quotes autour du nom dans la requête
+        var result = driver.executableQuery("MATCH (p:Agent {name: '" + name + "'}) RETURN p")
                 .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                 .execute();
 
         if (result.records().isEmpty()) {
-            result = driver.executableQuery("CREATE (p:Agent {name: " + name + "}) RETURN p")
+            result = driver.executableQuery("CREATE (p:Agent {name: '" + name + "'}) RETURN p")
                     .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                     .execute();
         }
@@ -77,36 +69,50 @@ public class PrologToGraphDB {
     }
 
     /**
-     * Extracts parameters from a Prolog file line by retrieving the content between parenthesis and splitting between ",". Does not work for lines with lists.
-     *
-     * @param line Prolog file line
-     * @return String array containing the parameters list
+     * Extracts parameters from a Prolog file line by retrieving the content between parenthesis and splitting between ",".
+     * Strips any single-quotes around each parameter so we don’t double-quote in Cypher.
      */
     private static String[] extractClassicParameters(String line) {
         String t = StringUtils.substringBeforeLast(line, ")");
-        return StringUtils.substringAfter(t, "(").split(",");
+        String params = StringUtils.substringAfter(t, "(");
+        return Arrays.stream(params.split(","))
+                .map(String::trim)
+                // <-- strip outer single-quotes here:
+                .map(s -> StringUtils.strip(s, "'"))
+                .toArray(String[]::new);
     }
+
 
     /**
      * Extracts parameters from a Prolog 'purposes' predicate.
-     *
-     * @param line Prolog 'purposes' predicate line
-     * @return String array of size 2 containing the purposes list and the other parameters list.
+     * Strips any single-quotes around each token so they’re ready for Cypher.
      */
     private static String[][] extractPurposesParameters(String line) {
+        // 1) pull out the list of purposes inside the [ … ]
         String t1 = StringUtils.substringBeforeLast(line, "]");
-        String[] purposes = StringUtils.substringAfter(t1, "[").split(",");
+        String purposesStr = StringUtils.substringAfter(t1, "[");
+        String[] purposes = Arrays.stream(purposesStr.split(","))
+                .map(String::trim)
+                // strip outer single-quotes
+                .map(s -> StringUtils.strip(s, "'"))
+                .toArray(String[]::new);
+
+        // 2) pull out the parameters inside the ( … )
         String t2 = StringUtils.substringBeforeLast(line, ")");
-        String[] params = StringUtils.substringAfter(t2, "(").split(",");
+        String paramsStr = StringUtils.substringAfter(t2, "(");
+        String[] params = Arrays.stream(paramsStr.split(","))
+                .map(String::trim)
+                // strip outer single-quotes
+                .map(s -> StringUtils.strip(s, "'"))
+                .toArray(String[]::new);
+
         return new String[][]{purposes, params};
     }
+
 
     /**
      * Converts a provenance graph from a Prolog file to a GraphDB. The currently stored GraphDB is deleted and replaced
      * by the newly generated provenance graph.
-     *
-     * @param driver GraphDB driver
-     * @param path   Prolog provenance graph path
      */
     protected static void convert(Driver driver, String path) {
 
@@ -131,9 +137,10 @@ public class PrologToGraphDB {
                     getProcess(driver, params[0]);
                     getAgent(driver, params[1]);
 
+                    // CORRECTION: Formatter correctement toutes les propriétés avec quotes si nécessaire
                     driver.executableQuery(
-                                    "MATCH (p:Process {name: " + params[0] + "}), (a:Agent {name: " + params[1] + "}) " +
-                                            "CREATE (p)-[r:wasControlledBy {ctx:" + params[2] + ", TB:" + params[3] + ", TE:" + params[4] + "}]->(a)")
+                                    "MATCH (p:Process {name: '" + params[0] + "'}), (a:Agent {name: '" + params[1] + "'}) " +
+                                            "CREATE (p)-[r:wasControlledBy {ctx: '" + params[2] + "', TB: " + params[3] + ", TE: " + params[4] + "}]->(a)")
                             .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                             .execute();
                 } else if (line.startsWith("wasGeneratedBy")) {
@@ -143,19 +150,30 @@ public class PrologToGraphDB {
                     getProcess(driver, params[1]);
 
                     driver.executableQuery(
-                                    "MATCH (a:Artifact {name: " + params[0] + "}), (p:Process {name: " + params[1] + "}) " +
-                                            "CREATE (a)-[r:wasGeneratedBy {ctx:" + params[2] + ", TG:" + params[3] + "}]->(p)")
+                                    "MATCH (a:Artifact {name: '" + params[0] + "'}), (p:Process {name: '" + params[1] + "'}) " +
+                                            "CREATE (a)-[r:wasGeneratedBy {ctx: '" + params[2] + "', TG: " + params[3] + "}]->(p)")
                             .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                             .execute();
+
+                    // === CORRECTION LOGIQUE ===
+                    // On vérifie si le contexte (3ème paramètre) est 'personal data'
+                    if (params.length > 2 && params[2].equals("personal data")) {
+                        driver.executableQuery(
+                                        "MATCH (a:Artifact {name: '" + params[0] + "'}) " +
+                                                "SET a.type = 'personal_data', a.category = '" + params[2] + "'") // On peut réutiliser params[2] pour la catégorie
+                                .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
+                                .execute();
+                    }
                 } else if (line.startsWith("used")) {
                     String[] params = extractClassicParameters(line);
 
                     getProcess(driver, params[0]);
                     getArtifact(driver, params[1]);
 
+                    // CORRECTION: Assurer que tous les timestamps sont correctement formatés
                     driver.executableQuery(
-                                    "MATCH (p:Process {name: " + params[0] + "}), (a:Artifact {name: " + params[1] + "}) " +
-                                            "CREATE (p)-[r:used {ctx:" + params[2] + ", TU:" + params[3] + "}]->(a)")
+                                    "MATCH (p:Process {name: '" + params[0] + "'}), (a:Artifact {name: '" + params[1] + "'}) " +
+                                            "CREATE (p)-[r:used {ctx: '" + params[2] + "', TU: " + params[3] + "}]->(a)")
                             .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                             .execute();
                 } else if (line.startsWith("wasTriggeredBy")) {
@@ -165,19 +183,20 @@ public class PrologToGraphDB {
                     getProcess(driver, params[1]);
 
                     driver.executableQuery(
-                                    "MATCH (p1:Process {name: " + params[0] + "}), (p2:Process {name: " + params[1] + "}) " +
-                                            "CREATE (p1)-[r:wasTriggeredBy {ctx:" + params[2] + ", T:" + params[3] + "}]->(p2)")
+                                    "MATCH (p1:Process {name: '" + params[0] + "'}), (p2:Process {name: '" + params[1] + "'}) " +
+                                            "CREATE (p1)-[r:wasTriggeredBy {ctx: '" + params[2] + "', T: " + params[3] + "}]->(p2)")
                             .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                             .execute();
                 } else if (line.startsWith("wasDerivedFrom")) {
                     String[] params = extractClassicParameters(line);
 
-                    getProcess(driver, params[0]);
-                    getProcess(driver, params[1]);
+                    // CORRECTION: Les deux doivent être des Artifacts, pas des Process
+                    getArtifact(driver, params[0]);
+                    getArtifact(driver, params[1]);
 
                     driver.executableQuery(
-                                    "MATCH (a1:Artifact {name: " + params[0] + "}), (a2:Artifact {name: " + params[1] + "}) " +
-                                            "CREATE (a1)-[r:wasDerivedFrom {ctx:" + params[2] + ", T:" + params[3] + "}]->(a2)")
+                                    "MATCH (a1:Artifact {name: '" + params[0] + "'}), (a2:Artifact {name: '" + params[1] + "'}) " +
+                                            "CREATE (a1)-[r:wasDerivedFrom {ctx: '" + params[2] + "', T: " + params[3] + "}]->(a2)")
                             .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                             .execute();
                 } else if (line.startsWith("action")) {
@@ -185,40 +204,48 @@ public class PrologToGraphDB {
 
                     getProcess(driver, params[0]);
 
+                    // CORRECTION: Ajouter quotes si nécessaire
                     driver.executableQuery(
-                                    "MATCH (p:Process {name: " + params[0] + "}) " +
-                                            "SET p.action = " + params[1])
+                                    "MATCH (p:Process {name: '" + params[0] + "'}) " +
+                                            "SET p.action = '" + params[1].replace("'", "") + "'")
                             .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                             .execute();
                 } else if (line.startsWith("purposes")) {
                     String[][] res = extractPurposesParameters(line);
-
                     String[] purposes = res[0];
-                    String[] params = res[1];
+                    String[] params   = res[1];
 
-                    String consentName;
-                    if (Objects.equals(params[0], "_")) {
-                        consentName = "'mandatory_consent'";
-                    } else {
-                        consentName = params[0];
-                    }
+                    String consentName = Objects.equals(params[0], "_")
+                            ? "mandatory_consent"
+                            : params[0];
                     getArtifact(driver, consentName);
 
-                    String data = params[1].replace("'", "");
+                    String data = params[1];
+
+                    // Build a Cypher list literal, NOT a quoted string
+                    String purposesList = "[" +
+                            Arrays.stream(purposes)
+                                    .map(p -> "'" + p + "'")
+                                    .collect(Collectors.joining(", "))
+                            + "]";
 
                     driver.executableQuery(
-                                    "MATCH (c:Artifact {name: " + consentName + "}) " +
-                                            "SET c." + data + " = " + Arrays.toString(purposes))
-                            .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
+                                    "MATCH (c:Artifact {name: '" + consentName + "'}) " +
+                                            "SET c." + data + "_purposes = " + purposesList + ", " +
+                                            "c.consent_type = 'purposes_consent'"
+                            ).withConfig(QueryConfig.builder()
+                                    .withDatabase("neo4j")
+                                    .build())
                             .execute();
                 }
+
             }
+
+            br.close();
+            fr.close();
 
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-
-
     }
-
 }

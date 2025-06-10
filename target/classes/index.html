@@ -1,5 +1,77 @@
 <!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>Neovis.js Simple Example</title>
-    <script src="https://unpkg.com/neovis.js@2.1.0"></script>
+    <meta charset="UTF-8">
+    <title>Neovis.js – compact labels, full hover</title>
+    <style>
+        html,body { font:16pt arial }
+        #viz      { width:900px; height:700px; border:1px solid lightgray;
+                    font:22pt arial }
+    </style>
 </head>
+
+<body onload="draw()">
+<div id="viz"></div>
+
+<script src="https://unpkg.com/neovis.js@2.1.0"></script>
+<script>
+
+    let neoViz;
+
+    function draw () {
+
+        const config = {
+            containerId : "viz",
+
+            neo4j : {
+                serverUrl      : "bolt://localhost:7687",
+                serverUser     : "neo4j",
+                serverPassword : "01012002"
+            },
+
+            visConfig : {
+                nodes : { shape:"box" },
+                edges : {
+                    arrows:{ to:{ enabled:true, type:"arrow" } }
+                }
+            },
+
+            /* original compact labels ----------------------------------------- */
+            labels : {
+                Agent :    { label:"name" },
+                Artifact : { label:"name", shape:"circle" },
+                Process :  { label:"name" }
+            },
+            relationships : {
+                wasGeneratedBy  : { label:"ctx" },
+                wasControlledBy : { label:"ctx" },
+                used            : { label:"ctx" },
+                wasTriggeredBy  : { label:"ctx" },
+                wasDerivedFrom  : { label:"ctx" }
+            },
+
+            initialCypher : "MATCH (n)-[r]->(m) RETURN *"
+        };
+
+        /* -------- full-properties tooltip on hover -------- */
+        const fullDetails = item =>
+            Object.entries(item.properties)
+                  .map(([k,v]) => k + ": " + v)
+                  .join('\n');        // “\n” -> new line in vis tooltip
+
+        /* attach to every label & relationship */
+        Object.values(config.labels).forEach(l => {
+            l[NeoVis.NEOVIS_ADVANCED_CONFIG] = { function:{ title:fullDetails } };
+        });
+        Object.values(config.relationships).forEach(r => {
+            r[NeoVis.NEOVIS_ADVANCED_CONFIG] = { function:{ title:fullDetails } };
+        });
+
+        /* render ---------------------------------------------------------------- */
+        neoViz = new NeoVis.default(config);
+        neoViz.render();
+    }
+</script>
+</body>
+</html>
+

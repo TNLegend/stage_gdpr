@@ -95,4 +95,12 @@ public class Converter {
         return cheminGraphe;
     }
 
+    /**
+     * Retourne la liste des noms des principes sélectionnés par l'utilisateur.
+     * @return Une liste de chaînes (ex: ["Right-to-erasure", "Lawfullness"])
+     */
+    public List<String> getPrincipes() {
+        return this.principes;
+    }
+
 }

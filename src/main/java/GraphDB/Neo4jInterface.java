@@ -1,11 +1,15 @@
 package GraphDB;
 
-import org.neo4j.driver.AuthTokens;
-import org.neo4j.driver.GraphDatabase;
+import org.neo4j.driver.*;
+import org.neo4j.driver.Record;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.io.*;
+import java.util.Map;
 import java.util.Objects;
 
 import static com.sun.javafx.scene.control.skin.Utils.getResource;
@@ -16,21 +20,14 @@ public class Neo4jInterface {
     private String password;
     public final String generatedPrologGraphPath = "src/main/resources/prov_graph.pl";
 
-    /**
-     * Necessary credentials required to log in to Neo4J
-     * @param uri GraphDB URI
-     * @param user GraphDB username
-     * @param password GraphDB password
-     */
+    // ... setParameters, retrievePrologPG, et retrieveGraphDB restent inchangés ...
+
     public void setParameters(String uri, String user, String password) {
         this.uri = uri;
         this.user = user;
         this.password = password;
     }
 
-    /**
-     * Retrieves the GraphDB provenance graph and writes a corresponding Prolog file (stored in Neo4jInterface.generatedPrologGraphPath)
-     */
     public void retrievePrologPG(){
         try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(user, password))) {
             driver.verifyConnectivity();
@@ -39,10 +36,6 @@ public class Neo4jInterface {
         }
     }
 
-    /**
-     * Retrieves the Prolog provenance graph and stores it to the GraphDB (replacing the previously stored DB)
-     * @param path Prolog file to load to the GraphDB
-     */
     public void retrieveGraphDB(String path){
         try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(user, password))) {
             driver.verifyConnectivity();
@@ -51,16 +44,27 @@ public class Neo4jInterface {
         }
     }
 
+    // --- NOUVELLE MÉTHODE ---
     /**
-     * Generates the HTML file allowing graph visualization. The index.html is generated based on the index_pattern.html file,
-     * by filling in the credentials and CYPHER query. This query determines what we get to see from the DB. Depending on the
-     * moment this method is called, it is either the whole graph or a subGraph centered on a specific issue.
-     * TODO : change the way the credentials are managed (currently written directly to the HTML file)
-     * @param query CYPHER query to retrieve selected elements from the DB
+     * Exécute une requête Cypher paramétrée et retourne le résultat brut.
+     * @param query La requête Cypher à exécuter.
+     * @param params Une map des paramètres pour la requête (ex: {"currentTime": 5000}).
+     * @return Un objet Result contenant les lignes de la réponse.
      */
+    public Result executeQuery(String query, Map<String, Object> params) {
+        // On utilise un driver et une session pour cette seule requête.
+        // Le try-with-resources s'assure que tout est bien fermé.
+        try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(user, password));
+             var session = driver.session()) {
+
+            System.out.println("Executing Cypher Query: " + query);
+            return session.run(query, params);
+        }
+    }
+
+    // ... buildVizHtmlFile reste inchangée ...
     public void buildVizHtmlFile(String query) {
         try {
-            // load the pattern and output as URIs so that any %20 etc is decoded
             URI patternUri = Objects
                     .requireNonNull(getClass().getResource("/index_pattern.html"))
                     .toURI();
@@ -90,8 +94,5 @@ public class Neo4jInterface {
         } catch (Exception e) {
             throw new RuntimeException("Failed to build viz HTML", e);
         }
-
-
     }
-
 }

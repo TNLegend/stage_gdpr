@@ -1,39 +1,45 @@
-wasControlledBy('askErase','Bob','owner',44800,44800).
-wasControlledBy('sendData','Bob','receiver',44700,44703).
-wasControlledBy('askDataAccess','Bob','owner',36,37).
-wasControlledBy('update','Bob','owner',29,30).
-wasControlledBy('joinGroup','Bob','owner',20,21).
-wasControlledBy('consent','Bob','owner',16,20).
-wasControlledBy('create_account','Bob','owner',10,15).
-wasControlledBy('sendData','DC','owner',44700,44703).
-wasGeneratedBy('privacy_policy_template','create_account','policy',15).
-wasGeneratedBy('email_bob','create_account','personal data',15).
-wasGeneratedBy('id_bob','create_account','personal data',15).
-wasGeneratedBy('phone_bob','create_account','personal data',15).
-wasGeneratedBy('friend_list_bob','create_account','personal data',15).
-wasGeneratedBy('wall_bob','create_account','personal data',15).
-wasGeneratedBy('consent_bob_v0','consent','consent',17).
-wasGeneratedBy('consent_bob_v1','update','consent',29).
-wasGeneratedBy('data_request','askDataAccess','request',37).
-wasGeneratedBy('data_report','sendData','data response',44703).
-wasGeneratedBy('marketing_cookie','createCookie','cookie',21).
-wasTriggeredBy('consent','create_account','policy_used',15).
-wasTriggeredBy('createCookie','joinGroup','information',21).
-used('consent','privacy_policy_template','template',16).
-used('sendCookie','marketing_cookie','cookie',26).
-used('update','consent_bob_v0','consent',29).
-used('sendData','data_request','request',44701).
-used('askErase','phone_bob','to erase data',44800).
-used('createCookie','id_bob','id',21).
-action('create_account','createAccount').
-action('consent','consent').
-action('joinGroup','joinGroup').
-action('update','updateConsent').
-action('askDataAccess','askDataAccess').
+wasControlledBy('createAccount','David','owner',1,7).
+wasControlledBy('consent','David','owner',8,9).
+wasControlledBy('sendTicket','David','owner',10,13).
+wasGeneratedBy('physicalAddress_David_1','createAccount','personal data',6).
+wasGeneratedBy('id_David_1','createAccount','personal data',7).
+wasGeneratedBy('consent_David_1','consent','consent',9).
+wasGeneratedBy('ticket','sendTicket','ticket to send',12).
+wasGeneratedBy('bankAccount_David_1','createAccount','personal data',2).
+wasGeneratedBy('phoneNumber_David_1','createAccount','personal data',3).
+wasGeneratedBy('mail_David_1','createAccount','personal data',4).
+wasGeneratedBy('name_David_1','createAccount','personal data',5).
+used('sendTicket','mail_David_1','ticket sender mail',11).
+used('sendTicket','ticket','ticket sent',13).
 action('sendData','sendData').
+action('sendThirdPartiesCookie','sendThirdPartiesCookie').
+action('updateData','updateData').
+action('sendAdSMS','sendAdSMS').
+action('sendMail','sendMail').
+action('sendImprovementCookie','sendImprovementCookie').
+action('buyItem','buyItem').
+action('delete','delete').
+action('askDataAccess','askDataAccess').
+action('askRefund','askRefund').
+action('sendPersonalizationCookie','sendPersonalizationCookie').
+action('sendAnalysisCookie','sendAnalysisCookie').
+action('providePolicy','providePolicy').
 action('askErase','askErase').
-action('createCookie','createCookie').
-action('sendCookie','thirdParties').
-purposes('consent_bob_v0',_,['thirdParties','analysis','improvement']).
-purposes('consent_bob_v1',_,['analysis','improvement']).
-purposes(_,_,['consent','delete','sendData','askErase','askDataAccess','createCookie']).
+action('updateConsent','updateConsent').
+action('refund','refund').
+action('createAccount','createAccount').
+action('consent','consent').
+action('sendTicket','sendTicket').
+purposes('consent_David_1','phoneNumber_David_1_purposes_purposes_purposes',['sendAdSMS']).
+purposes('consent_David_1','consent_type_purposes',[]).
+purposes('consent_David_1','consent_type_purposes_purposes',[]).
+purposes('consent_David_1','id_David_1_purposes_purposes_purposes',['sendImprovementCookie','sendThirdPartiesCookie']).
+purposes('consent_David_1','consent_type',purposes_consent).
+purposes(_,'consent_type_purposes',[]).
+purposes(_,'__purposes_purposes_purposes',['consent','delete','askErase','sendData','askDataAccess','updateConsent','updateData','createAccount']).
+purposes(_,'bankAccount_David_1_purposes_purposes_purposes',['buyItem','askRefund','refund']).
+purposes(_,'consent_type_purposes_purposes',[]).
+purposes(_,'name_David_1_purposes_purposes_purposes',['buyItem']).
+purposes(_,'mail_David_1_purposes_purposes_purposes',['sendMail','sendTicket']).
+purposes(_,'consent_type',purposes_consent).
+purposes(_,'physicalAddress_David_1_purposes_purposes_purposes',['buyItem']).

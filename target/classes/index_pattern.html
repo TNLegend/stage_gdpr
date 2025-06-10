@@ -2,92 +2,76 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Neovis.js Simple Example</title>
-    <style type="text/css">
-        html, body {
-            font: 16pt arial;
-        }
-
-        #viz {
-            width: 900px;
-            height: 700px;
-            border: 1px solid lightgray;
-            font: 22pt arial;
-        }
+    <title>Neovis.js – compact labels, full hover</title>
+    <style>
+        html,body { font:16pt arial }
+        #viz      { width:900px; height:700px; border:1px solid lightgray;
+                    font:22pt arial }
     </style>
 </head>
+
 <body onload="draw()">
 <div id="viz"></div>
+
 <script src="https://unpkg.com/neovis.js@2.1.0"></script>
-<script type="text/javascript">
+<script>
 
     let neoViz;
 
-    function draw() {
+    function draw () {
 
         const config = {
-            containerId: "viz",
-            neo4j: {
-                serverUrl: "%DB_URL%",
-                serverUser: "%DB_USER%",
-                serverPassword: "%DB_PW%"
+            containerId : "viz",
+
+            neo4j : {
+                serverUrl      : "%DB_URL%",
+                serverUser     : "%DB_USER%",
+                serverPassword : "%DB_PW%"
             },
 
-            visConfig: {
-                nodes: {
-                    shape: "box"
-                },
-                edges: {
-                    arrows: {
-                        to: {
-                            enabled: true,
-                            type: 'arrow'
-                        }
-                    }
+            visConfig : {
+                nodes : { shape:"box" },
+                edges : {
+                    arrows:{ to:{ enabled:true, type:"arrow" } }
                 }
+            },
 
+            /* original compact labels ----------------------------------------- */
+            labels : {
+                Agent :    { label:"name" },
+                Artifact : { label:"name", shape:"circle" },
+                Process :  { label:"name" }
             },
-            labels: {
-                Agent :{
-                    label: "name"
-                },
-                Artifact :{
-                    label: "name",
-                    shape: "circle"
-                },
-                Process : {
-                    label: "name"
-                }
+            relationships : {
+                wasGeneratedBy  : { label:"ctx" },
+                wasControlledBy : { label:"ctx" },
+                used            : { label:"ctx" },
+                wasTriggeredBy  : { label:"ctx" },
+                wasDerivedFrom  : { label:"ctx" }
             },
-            relationships: {
-              wasGeneratedBy: {
-                 label: 'ctx',
-                 title: 'TG'
-              },
-              wasControlledBy: {
-                 label: 'ctx',
-                 title: function (rel) {
-                    return "TB="+rel.properties.TB+"<br>TE="+rel.properties.TE;
-                 }
-              },
-              used: {
-                 label: 'ctx',
-                 title: 'TU'
-              },
-              wasTriggeredBy: {
-                 label: 'ctx',
-                 title: 'T'
-              },
-              wasDerivedFrom: {
-                 label: 'ctx',
-                 title: 'T'
-              }
-            },
-            initialCypher: "%CYPHER_QUERY%"
+
+            initialCypher : "%CYPHER_QUERY%"
         };
+
+        /* -------- full-properties tooltip on hover -------- */
+        const fullDetails = item =>
+            Object.entries(item.properties)
+                  .map(([k,v]) => k + ": " + v)
+                  .join('\n');        // “\n” -> new line in vis tooltip
+
+        /* attach to every label & relationship */
+        Object.values(config.labels).forEach(l => {
+            l[NeoVis.NEOVIS_ADVANCED_CONFIG] = { function:{ title:fullDetails } };
+        });
+        Object.values(config.relationships).forEach(r => {
+            r[NeoVis.NEOVIS_ADVANCED_CONFIG] = { function:{ title:fullDetails } };
+        });
+
+        /* render ---------------------------------------------------------------- */
         neoViz = new NeoVis.default(config);
         neoViz.render();
     }
 </script>
 </body>
 </html>
+
