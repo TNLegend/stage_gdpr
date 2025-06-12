@@ -9,8 +9,11 @@ wasGeneratedBy('bankAccount_David_1','createAccount','personal data',2).
 wasGeneratedBy('phoneNumber_David_1','createAccount','personal data',3).
 wasGeneratedBy('mail_David_1','createAccount','personal data',4).
 wasGeneratedBy('name_David_1','createAccount','personal data',5).
-used('sendTicket','mail_David_1','ticket sender mail',11).
 used('sendTicket','ticket','ticket sent',13).
+used('sendTicket','mail_David_1','ticket sender mail',11).
+action('createAccount','createAccount').
+action('consent','consent').
+action('sendTicket','sendTicket').
 action('sendData','sendData').
 action('sendThirdPartiesCookie','sendThirdPartiesCookie').
 action('updateData','updateData').
@@ -27,19 +30,18 @@ action('providePolicy','providePolicy').
 action('askErase','askErase').
 action('updateConsent','updateConsent').
 action('refund','refund').
-action('createAccount','createAccount').
-action('consent','consent').
-action('sendTicket','sendTicket').
-purposes('consent_David_1','phoneNumber_David_1_purposes_purposes_purposes',['sendAdSMS']).
 purposes('consent_David_1','consent_type_purposes',[]).
+purposes('consent_David_1','phoneNumber_David_1_purposes_purposes_purposes_purposes',['sendAdSMS']).
+purposes('consent_David_1','id_David_1_purposes_purposes_purposes_purposes',['sendImprovementCookie','sendThirdPartiesCookie']).
 purposes('consent_David_1','consent_type_purposes_purposes',[]).
-purposes('consent_David_1','id_David_1_purposes_purposes_purposes',['sendImprovementCookie','sendThirdPartiesCookie']).
+purposes('consent_David_1','consent_type_purposes_purposes_purposes',[]).
 purposes('consent_David_1','consent_type',purposes_consent).
+purposes(_,'physicalAddress_David_1_purposes_purposes_purposes_purposes',['buyItem']).
 purposes(_,'consent_type_purposes',[]).
-purposes(_,'__purposes_purposes_purposes',['consent','delete','askErase','sendData','askDataAccess','updateConsent','updateData','createAccount']).
-purposes(_,'bankAccount_David_1_purposes_purposes_purposes',['buyItem','askRefund','refund']).
+purposes(_,'name_David_1_purposes_purposes_purposes_purposes',['buyItem']).
+purposes(_,'mail_David_1_purposes_purposes_purposes_purposes',['sendMail','sendTicket']).
 purposes(_,'consent_type_purposes_purposes',[]).
-purposes(_,'name_David_1_purposes_purposes_purposes',['buyItem']).
-purposes(_,'mail_David_1_purposes_purposes_purposes',['sendMail','sendTicket']).
+purposes(_,'consent_type_purposes_purposes_purposes',[]).
+purposes(_,'bankAccount_David_1_purposes_purposes_purposes_purposes',['buyItem','askRefund','refund']).
 purposes(_,'consent_type',purposes_consent).
-purposes(_,'physicalAddress_David_1_purposes_purposes_purposes',['buyItem']).
+purposes(_,'__purposes_purposes_purposes_purposes',['consent','delete','askErase','sendData','askDataAccess','updateConsent','updateData','createAccount']).

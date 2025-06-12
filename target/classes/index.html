@@ -26,7 +26,7 @@
             neo4j : {
                 serverUrl      : "bolt://localhost:7687",
                 serverUser     : "neo4j",
-                serverPassword : "01012002"
+                serverPassword : "rootroot"
             },
 
             visConfig : {
@@ -50,7 +50,7 @@
                 wasDerivedFrom  : { label:"ctx" }
             },
 
-            initialCypher : "MATCH (n)-[r]->(m) RETURN *"
+            initialCypher : "MATCH path = (p:Process {name:'sendTicket'})-[u:used]-(d:Artifact {name:'ticket'}) WHERE u.TU = 13 RETURN path"
         };
 
         /* -------- full-properties tooltip on hover -------- */

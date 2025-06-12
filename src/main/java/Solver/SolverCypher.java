@@ -158,11 +158,25 @@ public class SolverCypher implements SolverInterface {
 
 
     private String extractValue(String line) {
-        try {
-            return line.substring(line.lastIndexOf(',') + 1, line.lastIndexOf(')')).trim();
-        } catch (Exception e) {
-            // Gère le cas tCurrent(5000) qui n'a pas de virgule
-            return line.substring(line.indexOf('(') + 1, line.indexOf(')')).trim();
+        // This regex pattern looks for digits inside the last pair of parentheses
+        // It's designed to work for both "tCurrent(5000)" and "tLimit('access',1000)"
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\((\\d+)\\)|,\\s*(\\d+)\\)");
+        java.util.regex.Matcher matcher = pattern.matcher(line);
+
+        String value = null;
+        while (matcher.find()) {
+            if (matcher.group(1) != null) { // For "tCurrent(5000)" format
+                value = matcher.group(1);
+            } else if (matcher.group(2) != null) { // For "tLimit('access',1000)" format
+                value = matcher.group(2);
+            }
+        }
+
+        if (value != null) {
+            return value;
+        } else {
+            // Handle cases where the value cannot be extracted (e.g., malformed lines)
+            throw new IllegalArgumentException("Could not extract numerical value from line: " + line);
         }
     }
 }
