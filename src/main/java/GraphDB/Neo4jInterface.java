@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -44,21 +45,23 @@ public class Neo4jInterface {
         }
     }
 
-    // --- NOUVELLE MÉTHODE ---
     /**
-     * Exécute une requête Cypher paramétrée et retourne le résultat brut.
-     * @param query La requête Cypher à exécuter.
-     * @param params Une map des paramètres pour la requête (ex: {"currentTime": 5000}).
-     * @return Un objet Result contenant les lignes de la réponse.
+     * MODIFIÉ : Exécute une requête Cypher et retourne une LISTE de Records.
+     * La conversion est faite ici pour éviter l'erreur "ResultConsumedException".
      */
-    public Result executeQuery(String query, Map<String, Object> params) {
-        // On utilise un driver et une session pour cette seule requête.
-        // Le try-with-resources s'assure que tout est bien fermé.
+    public List<Record> executeQuery(String query, Map<String, Object> params) {
+        // Le try-with-resources est toujours une bonne pratique
         try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(user, password));
              var session = driver.session()) {
 
             System.out.println("Executing Cypher Query: " + query);
-            return session.run(query, params);
+
+            // On exécute la requête
+            Result result = session.run(query, params);
+
+            // CHANGEMENT : On consomme le résultat et on le retourne comme une List.
+            // La connexion sera fermée après, mais nous avons déjà nos données.
+            return result.list();
         }
     }
 

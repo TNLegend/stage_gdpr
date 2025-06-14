@@ -107,8 +107,13 @@ public class SolverCypher implements SolverInterface {
             String query = getCypherQueryForPrinciple(issueType);
 
             if (query != null) {
-                Result result = neo.executeQuery(query, timeParams);
-                result.forEachRemaining(record -> issues.add(new Issue(issueType, record)));
+                // CHANGEMENT : On récupère maintenant une List<Record>
+                List<org.neo4j.driver.Record> records = neo.executeQuery(query, timeParams);
+
+                // On parcourt la liste avec une boucle for-each standard
+                for (org.neo4j.driver.Record record : records) {
+                    issues.add(new Issue(issueType, record));
+                }
             }
         }
 

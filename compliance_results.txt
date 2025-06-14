@@ -1,0 +1,2 @@
+[1] STORAGE LIMITATION ISSUE – data mail_David_1 was last used at 11 and not deleted in time
+[2] STORAGE LIMITATION ISSUE – data ticket was last used at 13 and not deleted in time

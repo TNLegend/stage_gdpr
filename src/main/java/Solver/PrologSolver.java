@@ -65,13 +65,23 @@ public class PrologSolver implements SolverInterface {
             Issue.IssueType issueType = Issue.IssueType.fromString(principleName);
             String prologQuery = getPrologQueryForPrinciple(issueType);
 
-            // Charger le fichier de règles correspondant s'il existe
-            String resourcePath = "/RGPD/" + issueType.typeName + ".pl";
-            if (getClass().getResource(resourcePath) != null) {
-                loadResource(resourcePath);
-            } else {
-                System.err.println("Warning: Prolog rule file not found for " + resourcePath);
-                continue;
+            // --- CORRECTION ICI ---
+            // On mappe le nom du type d'issue au nom de fichier réel.
+            String fileName = switch (issueType) {
+                case RIGHT_TO_ERASURE -> "erase_compliant.pl";
+                case RIGHT_TO_ACCESS -> "right_access.pl";
+                case STORAGE_LIMITATION -> "storage_limitation.pl";
+                case LEGAL -> "legal.pl";
+                default -> "";
+            };
+
+            if (!fileName.isEmpty()) {
+                try {
+                    loadResource("/RGPD/" + fileName);
+                } catch (IOException e) {
+                    System.err.println("Warning: Could not load rule file: " + fileName);
+                    continue; // On passe au principe suivant si le fichier n'est pas trouvé
+                }
             }
 
             try {
