@@ -67,6 +67,7 @@ public class Neo4jInterface {
 
     // ... buildVizHtmlFile reste inchangée ...
     public void buildVizHtmlFile(String query) {
+        System.out.println("[DEBUG-NEO4J] Appel de buildVizHtmlFile avec la requête: " + query);
         try {
             URI patternUri = Objects
                     .requireNonNull(getClass().getResource("/index_pattern.html"))

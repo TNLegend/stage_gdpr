@@ -42,13 +42,14 @@
                 Artifact : { label:"name", shape:"circle" },
                 Process :  { label:"name" }
             },
-            relationships : {
-                wasGeneratedBy  : { label:"ctx" },
-                wasControlledBy : { label:"ctx" },
-                used            : { label:"ctx" },
-                wasTriggeredBy  : { label:"ctx" },
-                wasDerivedFrom  : { label:"ctx" }
-            },
+           relationships : {
+    wasGeneratedBy  : { },   // ← on enlève label:"ctx"
+    wasControlledBy : { },
+    used            : { },
+    wasTriggeredBy  : { },
+    wasDerivedFrom  : { }
+},
+
 
             initialCypher : "%CYPHER_QUERY%"
         };
@@ -64,8 +65,13 @@
             l[NeoVis.NEOVIS_ADVANCED_CONFIG] = { function:{ title:fullDetails } };
         });
         Object.values(config.relationships).forEach(r => {
-            r[NeoVis.NEOVIS_ADVANCED_CONFIG] = { function:{ title:fullDetails } };
-        });
+    r[NeoVis.NEOVIS_ADVANCED_CONFIG] = {
+        function: {
+            label: rel => rel.type,  // → le libellé sera le type d’arête
+            title: fullDetails            // → tooltip complet
+        }
+    };
+});
 
         /* render ---------------------------------------------------------------- */
         neoViz = new NeoVis.default(config);

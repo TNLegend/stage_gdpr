@@ -122,7 +122,8 @@ public class Issue {
             default ->
                     raw = "MATCH (n)-[r]-(m) RETURN n,r,m";
         }
-        return raw.replaceAll("\\s+", " ").trim();
+        String finalQuery = raw.replaceAll("\\s+", " ").trim();
+        return finalQuery;
     }
 
     // --- MÉTHODES UTILITAIRES ---
