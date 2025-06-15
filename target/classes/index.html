@@ -64,11 +64,22 @@
         Object.values(config.labels).forEach(l => {
             l[NeoVis.NEOVIS_ADVANCED_CONFIG] = { function:{ title:fullDetails } };
         });
+
+        // On définit une palette de couleurs
+        const colorMap = {
+            "wasGeneratedBy":  "#C70039", // Rouge
+            "wasControlledBy": "#3357FF", // Bleu
+            "used":            "#33FF57", // Vert
+            "wasTriggeredBy":  "#F9C74F", // Jaune
+            "wasDerivedFrom":  "#90BE6D"  // Vert pâle
+        };
+
         Object.values(config.relationships).forEach(r => {
     r[NeoVis.NEOVIS_ADVANCED_CONFIG] = {
         function: {
-            label: rel => rel.type,  // → le libellé sera le type d’arête
-            title: fullDetails            // → tooltip complet
+            label: rel => rel.type,
+            title: fullDetails,
+            color: rel => colorMap[rel.type] || '#848484'
         }
     };
 });
