@@ -83,7 +83,12 @@ public class PrologSolver implements SolverInterface {
                     continue; // On passe au principe suivant si le fichier n'est pas trouvé
                 }
             }
-
+            // --- CHANGEMENT : LE BLOC DE DÉBOGAGE EST MAINTENANT SANS CONDITION ---
+            System.out.println("====================================================================");
+            System.out.println(">>> ACTIVATION DU TRACEUR PROLOG pour le principe : " + issueType.name());
+            System.out.println("====================================================================");
+            new Query("leash(-all)").hasSolution();
+            new Query("trace").hasSolution();
             try {
                 Query q = new Query(prologQuery);
                 if (q.hasSolution()) {

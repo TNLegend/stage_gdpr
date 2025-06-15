@@ -50,7 +50,7 @@
                 wasDerivedFrom  : { label:"ctx" }
             },
 
-            initialCypher : "MATCH path = (p:Process {name:'askErase'})-[r:used]-(d:Artifact {name:'phoneNumber_Alice_1'}) WHERE r.TU = 27 RETURN path"
+            initialCypher : "MATCH (n)-[r]->(m) RETURN *"
         };
 
         /* -------- full-properties tooltip on hover -------- */
