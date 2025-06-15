@@ -1,6 +1,5 @@
 # GDPR compliance checking tool
 
-CHEBRINE Ghiles
-DI SALVO-CILIA Pauline
-PAPA Hichame
-SABOUR Zakaria
+ABICH Mohamed Yassine
+BEN HENNI Oussema
+BEN MOUSSA Hichem
