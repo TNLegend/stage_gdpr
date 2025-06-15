@@ -10,7 +10,7 @@
     </style>
 </head>
 
-<body onload="draw()">
+<body>
 <div id="viz"></div>
 
 <script src="https://unpkg.com/neovis.js@2.1.0"></script>
@@ -18,15 +18,15 @@
 
     let neoViz;
 
-    function draw () {
+    function draw (serverUrl, serverUser, serverPassword) {
 
         const config = {
             containerId : "viz",
 
             neo4j : {
-                serverUrl      : "%DB_URL%",
-                serverUser     : "%DB_USER%",
-                serverPassword : "%DB_PW%"
+                serverUrl      : serverUrl,
+                serverUser     : serverUser,
+                serverPassword : serverPassword
             },
 
             visConfig : {

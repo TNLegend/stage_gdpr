@@ -21,6 +21,10 @@ public class Neo4jInterface {
     private String password;
     public final String generatedPrologGraphPath = "src/main/resources/prov_graph.pl";
 
+    public String getUri() { return uri; }
+    public String getUser() { return user; }
+    public String getPassword() { return password; }
+
     // ... setParameters, retrievePrologPG, et retrieveGraphDB restent inchangés ...
 
     public void setParameters(String uri, String user, String password) {

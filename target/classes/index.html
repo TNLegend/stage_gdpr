@@ -10,7 +10,7 @@
     </style>
 </head>
 
-<body onload="draw()">
+<body>
 <div id="viz"></div>
 
 <script src="https://unpkg.com/neovis.js@2.1.0"></script>
@@ -18,15 +18,15 @@
 
     let neoViz;
 
-    function draw () {
+    function draw (serverUrl, serverUser, serverPassword) {
 
         const config = {
             containerId : "viz",
 
             neo4j : {
-                serverUrl      : "bolt://localhost:7687",
-                serverUser     : "neo4j",
-                serverPassword : "01012002"
+                serverUrl      : serverUrl,
+                serverUser     : serverUser,
+                serverPassword : serverPassword
             },
 
             visConfig : {
@@ -61,7 +61,7 @@
 },
 
 
-            initialCypher : "MATCH path = (p:Process {name:'sendTicket'})-[u:used]-(d:Artifact {name:'mail_David_1'}) WHERE u.TU = 11 RETURN path"
+            initialCypher : "MATCH (n)-[r]->(m) RETURN n,r,m"
         };
 
         /* -------- full-properties tooltip on hover -------- */

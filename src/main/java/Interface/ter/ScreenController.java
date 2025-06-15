@@ -26,6 +26,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
+import javafx.concurrent.Worker;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
 
 public class ScreenController {
     // --- CHAMPS DE LA CLASSE (INCHANGÉS) ---
@@ -398,42 +401,54 @@ public class ScreenController {
 
         WebView webView = new WebView();
         WebEngine webEngine = webView.getEngine();
+
+        // 1. On génère le fichier HTML "squelette" SANS les identifiants
         neo.buildVizHtmlFile(query);
-        // Ligne corrigée
         String url = Objects.requireNonNull(getClass().getResource("/index.html")).toExternalForm();
 
+        // 2. On ajoute un "écouteur" qui attend que la page soit complètement chargée
+        webEngine.getLoadWorker().stateProperty().addListener(
+                (obs, oldState, newState) -> {
+                    // 3. Quand la page est prête (état SUCCEEDED)...
+                    if (newState == Worker.State.SUCCEEDED) {
+                        System.out.println("[DEBUG] WebView loaded. Injecting credentials and calling draw().");
+                        // ... on exécute notre fonction Javascript en lui passant les identifiants
+                        String script = String.format("draw('%s', '%s', '%s');",
+                                neo.getUri(), neo.getUser(), neo.getPassword());
+                        webEngine.executeScript(script);
+                    }
+                }
+        );
+
+        // 4. On charge la page HTML (qui attendra notre appel de script)
+        webEngine.load(url);
+
+        // Le reste de votre logique pour afficher la liste des issues reste identique
         if (previousScreen.equals("resultsScreen")) {
-            ObservableList<Issue> issues = new ObservableListWrapper<>(solveController.getSolver().getIssues());
-            final ListView<Issue> listView = new ListView<>();
+            ObservableList<Issue> issues = FXCollections.observableArrayList(solveController.getSolver().getIssues());
+            final ListView<Issue> listView = new ListView<>(issues);
             listView.setPrefSize(400, 450);
 
-            listView.setItems(issues);
-            listView.setCellFactory(ComboBoxListCell.forListView(issues));
-            Button reloadButton = new Button(" Reload ");
+            // Votre code pour le bouton Reload reste valide
+            Button reloadButton = new Button("Reload for Selected Issue");
             reloadButton.setOnAction(e -> {
                 Issue issue = listView.getSelectionModel().getSelectedItem();
-                String cypher = issue.toCypherQuery();
-                System.out.println("[DEBUG] Cypher généré pour l'issue " + issue.getId() + " :\n" + cypher + "\n");
-                neo.buildVizHtmlFile(cypher);
-                System.out.println("[DEBUG] URL index.html = " + url);
-
-                webEngine.reload();
+                if (issue != null) {
+                    String cypher = issue.toCypherQuery();
+                    neo.buildVizHtmlFile(cypher); // Regénère le HTML avec la nouvelle requête
+                    webEngine.reload(); // Recharge la page, ce qui redéclenchera l'écouteur
+                }
             });
-            VBox issuesScreen = new VBox(10);
-            issuesScreen.getChildren().addAll(listView, reloadButton);
+            VBox issuesScreen = new VBox(10, listView, reloadButton);
             graphVizAndIssuesScreen.getChildren().add(issuesScreen);
         }
 
-        webEngine.load(url);
+        Button returnButton = new Button("Previous");
+        returnButton.setOnAction(e -> activate(previousScreen));
 
-        Button returnButton = new Button(" Previous ");
-        returnButton.setOnAction(e -> {
-            activate(previousScreen);
-        });
         graphVizAndIssuesScreen.getChildren().add(webView);
         graphVizScreen.getChildren().addAll(graphVizAndIssuesScreen, returnButton);
         screenMap.put("graphVizScreen", graphVizScreen);
-
     }
 
     /**
