@@ -38,9 +38,19 @@
 
             /* original compact labels ----------------------------------------- */
             labels : {
-                Agent :    { label:"name" },
-                Artifact : { label:"name", shape:"circle" },
-                Process :  { label:"name" }
+                "Agent" : {
+                    "label": "name",
+                    "color": "#FFC300" // Jaune
+                },
+                "Artifact" : {
+                    "label": "name",
+                    "shape": "circle",
+                    "color": "#C70039" // Rouge
+                },
+                "Process" :  {
+                    "label": "name",
+                    "color": "#3375FF" // Bleu
+                }
             },
            relationships : {
     wasGeneratedBy  : { },   // ← on enlève label:"ctx"
