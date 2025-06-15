@@ -295,56 +295,78 @@ public class ScreenController {
     }
 
     /**
-     * Initialises the results screen displaying the list of every detected issue. The screen also allows the user to choose to
-     * display the provenance graph, by seeing a sub-graph for every issue.
-     * @throws IOException In case of an issue returning to the choice screen (issue with the parser)
+     * MODIFIÉ : Propose maintenant deux options de visualisation pour un flux cohérent.
+     * @param issues La liste des objets Issue générée par le solveur.
+     * @param resultsText La chaîne de caractères brute retournée par le solveur (pour le cas "OK").
      */
     public void initResultsScreen(List<Issue> issues, String resultsText) {
         VBox resultsVBox = new VBox(10);
         resultsVBox.setPadding(new Insets(20, 20, 20, 20));
         Label label = new Label("Results:");
 
-        // On utilise une ListView pour un affichage plus propre et interactif
         ListView<Issue> listView = new ListView<>();
+        // On rend la liste non-éditable mais sélectionnable
+        listView.setEditable(false);
 
         if (issues.isEmpty()) {
-            // Pour afficher un message clair si aucune violation n'est trouvée
-            TextArea resultsArea = new TextArea(resultsText);
-            resultsArea.setEditable(false);
-            resultsVBox.getChildren().addAll(label, resultsArea);
+            listView.getItems().add(null);
+            listView.setCellFactory(lv -> new ListCell<>() {
+                @Override
+                protected void updateItem(Issue item, boolean empty) {
+                    super.updateItem(item, empty);
+                    setText(empty ? null : resultsText);
+                }
+            });
         } else {
-            ObservableList<Issue> observableIssues = FXCollections.observableArrayList(solveController.getSolver().getIssues());
-            listView.setItems(observableIssues);
-            resultsVBox.getChildren().addAll(label, listView);
+            // On utilise la méthode de rendu toString() que nous avons définie dans la classe Issue
+            listView.setItems(FXCollections.observableArrayList(issues));
         }
 
-        Button visualizeGraph = new Button("Visualize graph");
-        visualizeGraph.setOnAction(e -> {
+        // --- CHANGEMENT : DEUX BOUTONS DE VISUALISATION ---
+
+        // 1. Bouton pour voir le graphe complet
+        // --- NOUVELLE LOGIQUE POUR LE BOUTON ---
+        Button visualizeFullGraphBtn = new Button("Visualize Full Graph");
+        visualizeFullGraphBtn.setOnAction(e -> {
             previousScreen = "resultsScreen";
+
             if (neo == null) {
-                Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "Selected provenance graph will be loaded to Neo4J. Please log in to continue. Selected graphDB will be deleted and replaced by " + graph.getName() + ". Continue ?", ButtonType.YES, ButtonType.NO, ButtonType.CANCEL);
+                // Si pas de connexion, on demande à l'utilisateur de se connecter
+                Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "A Neo4j connection is required. This will load the current provenance graph into the database. Continue?", ButtonType.YES, ButtonType.NO);
                 alert.showAndWait();
 
                 if (alert.getResult() == ButtonType.YES) {
-                    nextScreen = "graphVizScreen";
-                    initNeo4jLogInScreen();
-                    activate("neo4jLogInScreen");
+                    nextScreen = "graphVizScreen"; // La destination après la connexion
+                    initNeo4jLogInScreen(); // On prépare l'écran de connexion
+                    activate("neo4jLogInScreen"); // On l'active
                 }
-
-            }
-            else {
-                if (issues.isEmpty()) {
-                    initGraphVizScreen("MATCH (n) RETURN n LIMIT 50");
-                } else {
-                    // Visualise le sous-graphe de la première issue par défaut
-                    initGraphVizScreen(issues.get(0).toCypherQuery());
-                }
+            } else {
+                // Si on est déjà connecté (par exemple, après un run du Cypher Solver),
+                // on charge simplement le graphe et on l'affiche
+                System.out.println("Reloading full graph into Neo4j for visualization...");
+                neo.retrieveGraphDB(this.graph.getAbsolutePath());
+                initGraphVizScreen("MATCH (n)-[r]->(m) RETURN n,r,m"); // On limite pour la performance
                 activate("graphVizScreen");
             }
         });
 
-        Button newVerif = new Button("New compliance checking");
-        newVerif.setOnAction(e -> {
+        // 2. Bouton pour voir le détail d'une issue sélectionnée
+        Button visualizeIssueBtn = new Button("Visualize Selected Issue");
+        visualizeIssueBtn.setOnAction(e -> {
+            Issue selectedIssue = listView.getSelectionModel().getSelectedItem();
+            if (selectedIssue != null) {
+                previousScreen = "resultsScreen";
+                initGraphVizScreen(selectedIssue.toCypherQuery());
+                activate("graphVizScreen");
+            } else {
+                new Alert(Alert.AlertType.INFORMATION, "Please select an issue from the list first.").showAndWait();
+            }
+        });
+        // Le bouton de détail n'est activé que s'il y a des violations
+        visualizeIssueBtn.setDisable(issues.isEmpty());
+
+        Button newVerifBtn = new Button("New Compliance Checking");
+        newVerifBtn.setOnAction(e -> {
             try {
                 initChoiceScreen();
                 activate("choiceScreen");
@@ -353,7 +375,10 @@ public class ScreenController {
             }
         });
 
-        resultsVBox.getChildren().addAll(visualizeGraph, newVerif);
+        // On ajoute les boutons dans une HBox pour un meilleur agencement
+        HBox buttonBar = new HBox(10, visualizeFullGraphBtn, visualizeIssueBtn, newVerifBtn);
+
+        resultsVBox.getChildren().addAll(label, listView, buttonBar);
         screenMap.put("resultsScreen", resultsVBox);
     }
 

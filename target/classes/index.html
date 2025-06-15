@@ -61,7 +61,7 @@
 },
 
 
-            initialCypher : "MATCH (n)-[r]->(m) RETURN *"
+            initialCypher : "MATCH path = (p:Process {name:'sendTicket'})-[u:used]-(d:Artifact {name:'mail_David_1'}) WHERE u.TU = 11 RETURN path"
         };
 
         /* -------- full-properties tooltip on hover -------- */
