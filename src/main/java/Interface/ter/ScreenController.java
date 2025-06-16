@@ -173,6 +173,7 @@ public class ScreenController {
                     new Alert(Alert.AlertType.ERROR, "Please connect to Neo4j first to use the Cypher solver.").showAndWait();
                     return;
                 }
+                neo.retrieveGraphDB(graph.getAbsolutePath());
                 solver = new SolverCypher(this.neo);
             }
 
@@ -222,55 +223,110 @@ public class ScreenController {
         VBox neo4jLogInScreen = new VBox(10);
         neo4jLogInScreen.setPadding(new Insets(20, 20, 20, 20));
 
-        Label uri = new Label("Database URI");
-        uri.setWrapText(true);
-        Label user = new Label("User");
-        user.setWrapText(true);
-        Label password = new Label("Password");
-        password.setWrapText(true);
+        /* ── form controls ─────────────────────────────────────── */
+        Label uriLbl  = new Label("Database URI");
+        Label userLbl = new Label("User");
+        Label pwdLbl  = new Label("Password");
 
-        TextField uriField = new TextField();
-        uriField.setPromptText("Database URI");
-        TextField userField = new TextField();
-        uriField.setPromptText("User");
-        PasswordField passwordField = new PasswordField();
-        passwordField.setPromptText("Password");
+        TextField     uriField  = new TextField();
+        TextField     userField = new TextField();
+        PasswordField pwdField  = new PasswordField();
 
-        Button returnButton = new Button("Previous");
-        returnButton.setOnAction(e -> {
-            activate(previousScreen);
-        });
+        uriField.setPromptText("bolt://localhost:7687");
+        userField.setPromptText("neo4j");                 // ← fixed typo
+        pwdField.setPromptText("••••••");
 
-        Button submitButton = new Button(" Load ");
-        submitButton.setOnAction(event -> {
+        Button backBtn = new Button("Previous");
+        Button loadBtn = new Button("Load");
+
+        backBtn.setOnAction(e -> activate(previousScreen));
+
+        /* ── load button logic ─────────────────────────────────── */
+        loadBtn.setOnAction(e -> {
+        /* ------------------------------------------------------------------
+           1.  Build a proper URI (add bolt:// if missing, trim blanks)
+         ------------------------------------------------------------------ */
+            String uriText = uriField.getText().trim();
+            if (!uriText.startsWith("bolt://") &&
+                    !uriText.startsWith("neo4j://") &&
+                    !uriText.startsWith("bolt+s://") &&
+                    !uriText.startsWith("neo4j+s://"))
+            {
+                uriText = "bolt://" + uriText;
+            }
+
+        /* ------------------------------------------------------------------
+           2.  Prepare helper + flags
+         ------------------------------------------------------------------ */
             neo = new Neo4jInterface();
-            neo.setParameters(uriField.getText(), userField.getText(), passwordField.getText());
-            passwordField.clear();
-            if (nextScreen.equals("graphVizScreen")) {
-                System.out.println("Loading provenance graph from " + graph.getPath());
-                neo.retrieveGraphDB(graph.getPath());
-                initGraphVizScreen("MATCH (n)-[r]->(m) RETURN *");
-            } else {
-                neo.retrievePrologPG();
-                File graph = new File(neo.generatedPrologGraphPath);
-                if (graph.isFile()) {
-                    this.graph = graph;
-                    try {
+            neo.setParameters(uriText, userField.getText().trim(), pwdField.getText());
+            pwdField.clear();
+
+            boolean cypherLogin =
+                    "choiceScreen".equals(nextScreen) &&
+                            "choiceScreen".equals(previousScreen);
+
+            try {
+            /* ------------------------------------------------------------------
+               3.  Always verify credentials first so we fail fast
+             ------------------------------------------------------------------ */
+                try (var drv = org.neo4j.driver.GraphDatabase.driver(
+                        uriText,
+                        org.neo4j.driver.AuthTokens.basic(userField.getText().trim(),
+                                neo.getPassword())))
+                {
+                    drv.verifyConnectivity();          // throws on bad creds / URI
+                }
+
+            /* ------------------------------------------------------------------
+               4.  Branch-specific behaviour
+             ------------------------------------------------------------------ */
+                if ("graphVizScreen".equals(nextScreen)) {
+                    /* Visualisation flow */
+                    System.out.println("Loading provenance graph from " + graph.getPath());
+                    neo.retrieveGraphDB(graph.getAbsolutePath());
+                    initGraphVizScreen("MATCH (n)-[r]->(m) RETURN *");
+
+                } else if (!cypherLogin) {
+                    /* “Import from Neo4j” flow */
+                    neo.retrievePrologPG();
+                    File pg = new File(neo.generatedPrologGraphPath);
+                    if (pg.isFile()) {
+                        this.graph = pg;
                         initChoiceScreen();
-                    } catch (IOException e) {
-                        Text error = new Text("Parsed file opening error");
-                        neo4jLogInScreen.getChildren().add(error);
                     }
                 }
+                activate(nextScreen);
+
+            } catch (org.neo4j.driver.exceptions.AuthenticationException ex) {
+                new Alert(Alert.AlertType.ERROR,
+                        "Authentication failed – please check user name / password.")
+                        .showAndWait();
+
+            } catch (org.neo4j.driver.exceptions.ServiceUnavailableException ex) {
+                new Alert(Alert.AlertType.ERROR,
+                        "Cannot reach Neo4j at \"" + uriText +
+                                "\".  Make sure the DB is running and the port is correct.")
+                        .showAndWait();
+
+            } catch (Exception ex) {
+                new Alert(Alert.AlertType.ERROR,
+                        "Neo4j operation failed:\n" + ex.getMessage())
+                        .showAndWait();
+                ex.printStackTrace();
             }
-            activate(nextScreen);
         });
 
-        neo4jLogInScreen.getChildren().addAll(uri, uriField, user, userField, password, passwordField, submitButton, returnButton);
+        /* ── assemble ──────────────────────────────────────────── */
+        neo4jLogInScreen.getChildren().addAll(
+                uriLbl,  uriField,
+                userLbl, userField,
+                pwdLbl,  pwdField,
+                loadBtn, backBtn
+        );
         screenMap.put("neo4jLogInScreen", neo4jLogInScreen);
-
-
     }
+
 
     /**
      * Initialises a screen with hints on the time data file structure required.

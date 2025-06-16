@@ -79,6 +79,7 @@ public class Issue {
     public String getType() { return type.typeName; } // Pour la compatibilité avec l'ancien code
     public Map<String, Object> getProperties() { return properties; }
 
+
     // --- MÉTHODES D'AFFICHAGE ET DE VISUALISATION ---
 
     /**

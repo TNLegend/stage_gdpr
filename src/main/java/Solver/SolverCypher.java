@@ -16,74 +16,114 @@ public class SolverCypher implements SolverInterface {
     // --- NOS 4 REQUÊTES CYPHER FINALES ET VALIDÉES ---
 
     private static final String ERASE_QUERY = """
-        MATCH (p_ask:Process {action: 'askErase'})-[u_ask:used]->(d_target:Artifact)
-        OPTIONAL MATCH (p_delete:Process {action: 'delete'})-[u_delete:used]->(d_target) WHERE u_delete.TU > u_ask.TU
-        WITH d_target, p_ask, u_ask.TU AS TU_askErase, min(u_delete.TU) AS minDeletionTimestamp
-        WHERE $currentTime - TU_askErase >= $erasureLimitDuration AND (minDeletionTimestamp IS NULL OR minDeletionTimestamp - TU_askErase >= $erasureLimitDuration)
-        RETURN DISTINCT d_target.name AS D, TU_askErase AS T, p_ask.name AS P
+            MATCH (p_ask:Process {action: 'askErase'})-[u_ask:used]->(d_target:Artifact)
+            WHERE $currentTime - u_ask.TU >= $erasureLimitDuration
+            AND NOT EXISTS {
+            MATCH (d_target)<-[u_delete:used]-(:Process {action: 'delete'})
+            WHERE u_delete.TU > u_ask.TU AND (u_delete.TU - u_ask.TU) < $erasureLimitDuration
+                    }
+                    RETURN DISTINCT d_target.name AS D, u_ask.TU AS T, p_ask.name AS P
         """;
 
     private static final String ACCESS_QUERY = """
-        MATCH (s_demandeur:Agent)<-[wcb_ask:wasControlledBy]-(p_demande:Process {action: 'askDataAccess'}) WHERE wcb_ask.ctx = 'owner'
-        MATCH (a_demande:Artifact)-[wgb_ask:wasGeneratedBy]->(p_demande) WHERE wcb_ask.TE = wgb_ask.TG
-        WITH s_demandeur, a_demande, wcb_ask.TE AS TE_demande
-        WHERE $currentTime - TE_demande >= $accessLimitDuration
-        AND NOT EXISTS {
-          MATCH (p_envoi:Process {action: 'sendData'})-[u_send:used]->(a_demande)
-          MATCH (agent_systeme:Agent)<-[wcb_send:wasControlledBy]-(p_envoi)
-          WHERE wcb_send.TE > TE_demande AND (wcb_send.TE - TE_demande < $accessLimitDuration)
-        }
-        RETURN DISTINCT s_demandeur.name AS S, TE_demande AS TE
-        """;
+    // Demande d’accès non satisfaite
+    MATCH (s_demandeur:Agent)<-[wcb_ask:wasControlledBy]-
+          (p_demande:Process {action:'askDataAccess'})
+    WHERE wcb_ask.ctx = 'owner'
+    MATCH (a_demande:Artifact)-[wgb_ask:wasGeneratedBy]->(p_demande)   // <-- sens corrigé
+    WHERE wcb_ask.TE = wgb_ask.TG
+    WITH s_demandeur, a_demande, wcb_ask.TE AS TE_demande
+    WHERE $currentTime - TE_demande >= $accessLimitDuration
+      AND NOT EXISTS {
+        MATCH (p_envoi:Process {action:'sendData'})-[u_send:used]->(a_demande)
+        MATCH (agent_systeme:Agent)<-[wcb_send:wasControlledBy]-(p_envoi)
+        WHERE wcb_send.ctx = 'owner'
+          AND wcb_send.TE > TE_demande
+          AND wcb_send.TE - TE_demande < $accessLimitDuration
+      }
+    RETURN DISTINCT s_demandeur.name AS S,
+                    TE_demande          AS TE
+    """;
 
     private static final String CONSENT_QUERY = """
-        MATCH (p_using_data:Process)-[u:used]->(d_artifact_used:Artifact) WITH p_using_data, d_artifact_used, u
-        CALL {
-            WITH d_artifact_used
-            MATCH (d_artifact_used)-[r:wasGeneratedBy]->(:Process) WHERE r.ctx = 'personal data'
-            RETURN d_artifact_used AS dp_source
-            UNION
-            WITH d_artifact_used
-            MATCH (d_artifact_used)-[:wasGeneratedBy]->(:Process)-[:used]->(source)
-            MATCH (source)-[r:wasGeneratedBy]->(:Process) WHERE r.ctx = 'personal data'
-            RETURN source AS dp_source
-        }
-        WITH p_using_data, dp_source, d_artifact_used, u, p_using_data.action AS PU, u.TU AS T_utilisation
-        WHERE NOT PU IN $defaultPurposesList
-        AND NOT EXISTS {
-            MATCH (c:Artifact {consent_type: 'purposes_consent'})-[wgb_c:wasGeneratedBy]->(:Process)
-            WHERE wgb_c.TG < T_utilisation AND c[dp_source.name + '_purposes'] IS NOT NULL AND PU IN c[dp_source.name + '_purposes']
-            AND NOT EXISTS { MATCH (p_revoke:Process {action:'revokeConsent'})-[u_revoke:used]->(c) WHERE u_revoke.TU < T_utilisation AND u_revoke.TU >= wgb_c.TG }
+//  -------- Usage d’une donnée perso sans consentement valable --------
+MATCH (p_using_data:Process)-[u:used]->(d_artifact_used:Artifact)
+WITH p_using_data,
+     d_artifact_used,
+     p_using_data.action AS PU,
+     u.TU                AS T_utilisation
+WHERE NOT (PU IN $defaultPurposesList)
+
+/* --------- 1. retrouver la donnée perso source --------- */
+CALL {
+    WITH d_artifact_used
+    MATCH (d_artifact_used)-[:wasGeneratedBy|used*0..]-(dp_source:Artifact)
+          -[wgb_src:wasGeneratedBy]->(:Process)
+    WHERE wgb_src.ctx = 'personal data'          // <<< ctx on RELATIONSHIP
+    RETURN DISTINCT dp_source
+}
+WITH p_using_data, d_artifact_used, PU, T_utilisation, dp_source
+
+/* --------- 2. pas de consentement valable ? --------- */
+WHERE NOT EXISTS {
+    MATCH (c:Artifact {consent_type:'purposes_consent'})
+          -[wgb_c:wasGeneratedBy]->(:Process)
+    WHERE wgb_c.TG < T_utilisation
+      AND c[dp_source.name + '_purposes'] IS NOT NULL
+      AND PU IN c[dp_source.name + '_purposes']
+
+      /* pas de révocation de ce consentement avant l’usage */
+      AND NOT EXISTS {
+          MATCH (:Process {action:'revokeConsent'})-[u_rev:used]->(c)
+          WHERE u_rev.TU >= wgb_c.TG
+            AND u_rev.TU <  T_utilisation
+      }
+
+      /* pas d’autre consentement plus récent et toujours valide */
+      AND NOT EXISTS {
+          MATCH (c_next:Artifact {consent_type:'purposes_consent'})
+                -[wgb_next:wasGeneratedBy]->(:Process)
+          WHERE c_next <> c
+            AND wgb_next.TG > wgb_c.TG
+            AND wgb_next.TG < T_utilisation
+            AND c_next[dp_source.name + '_purposes'] IS NOT NULL
+            AND PU IN c_next[dp_source.name + '_purposes']
             AND NOT EXISTS {
-                MATCH (c_next:Artifact {consent_type:'purposes_consent'})-[wgb_c_next:wasGeneratedBy]->(:Process)
-                WHERE c_next <> c AND wgb_c_next.TG > wgb_c.TG AND wgb_c_next.TG < T_utilisation AND c_next[dp_source.name + '_purposes'] IS NOT NULL AND PU IN c_next[dp_source.name + '_purposes']
-                AND NOT EXISTS { MATCH (p_revoke_next:Process {action:'revokeConsent'})-[u_revoke_next:used]->(c_next) WHERE u_revoke_next.TU < T_utilisation AND u_revoke_next.TU >= wgb_c_next.TG }
+                MATCH (:Process {action:'revokeConsent'})-[u_rev2:used]->(c_next)
+                WHERE u_rev2.TU >= wgb_next.TG
+                  AND u_rev2.TU <  T_utilisation
             }
-        }
-        RETURN DISTINCT p_using_data.name AS P, d_artifact_used.name AS D_used, PU, T_utilisation AS T
-        """;
+      }
+}
+
+RETURN DISTINCT
+       p_using_data.name    AS P,
+       d_artifact_used.name AS D_used,
+       PU,
+       T_utilisation        AS T
+""";
 
     private static final String STORAGE_QUERY = """
-        MATCH (p_usage:Process)-[u_usage:used]->(artifact_used:Artifact) WHERE p_usage.action <> 'delete'
-        WITH artifact_used, max(u_usage.TU) AS actual_last_usage_TU
-        WHERE $currentTime - actual_last_usage_TU >= $storageLimitDuration
-        CALL {
-            WITH artifact_used
-            MATCH (artifact_used)-[r:wasGeneratedBy]->(:Process) WHERE r.ctx = 'personal data' OR r.ctx = 'ad to send'
-            RETURN artifact_used AS dp_source
-            UNION
-            WITH artifact_used
-            MATCH (artifact_used)-[:wasGeneratedBy]->(:Process)-[:used]->(source)
-            MATCH (source)-[r:wasGeneratedBy]->(:Process) WHERE r.ctx = 'personal data' OR r.ctx = 'ad to send'
-            RETURN source AS dp_source
-        }
-        WITH dp_source, artifact_used, actual_last_usage_TU
-        WHERE NOT EXISTS {
-            MATCH (p_delete:Process {action: 'delete'})-[u_delete:used]->(dp_source)
-            WHERE u_delete.TU > actual_last_usage_TU AND u_delete.TU - actual_last_usage_TU < $storageLimitDuration
-        }
-        RETURN DISTINCT artifact_used.name AS D, actual_last_usage_TU AS TU
-        """;
+    // Dépassement de délai de conservation
+    MATCH (p_usage:Process)-[u_usage:used]->(artifact_used:Artifact)
+    WHERE p_usage.action <> 'delete'
+    WITH artifact_used, max(u_usage.TU) AS actual_last_usage_TU
+    WHERE $currentTime - actual_last_usage_TU >= $storageLimitDuration
+    CALL {
+        WITH artifact_used
+        MATCH (artifact_used)-[:wasGeneratedBy|used*0..]-(dp_source:Artifact)
+        WHERE EXISTS { (dp_source)-[:wasGeneratedBy]->(:Process {ctx:'personal data'}) }
+        RETURN DISTINCT dp_source
+    }
+    WITH dp_source, artifact_used, actual_last_usage_TU
+    WHERE NOT EXISTS {
+        MATCH (p_delete:Process {action:'delete'})-[u_delete:used]->(dp_source)
+        WHERE u_delete.TU > actual_last_usage_TU
+          AND u_delete.TU - actual_last_usage_TU < $storageLimitDuration
+    }
+    RETURN DISTINCT artifact_used.name   AS D,
+                    actual_last_usage_TU AS TU
+    """;
 
 
     public SolverCypher(Neo4jInterface neo) {
@@ -95,7 +135,7 @@ public class SolverCypher implements SolverInterface {
         this.issues.clear();
 
         // 1. Charger les faits Prolog dans la base de données Neo4j
-        neo.retrieveGraphDB(provenanceGraphPath);
+        //neo.retrieveGraphDB(provenanceGraphPath);
 
         // 2. Lire les paramètres de temps
         Map<String, Object> timeParams = parseTimeFile(timeDataPath);
