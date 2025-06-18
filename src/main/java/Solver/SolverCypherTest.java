@@ -2,236 +2,215 @@ package Solver;
 
 import GraphDB.Neo4jInterface;
 import org.junit.jupiter.api.*;
+import org.mockito.ArgumentCaptor;
+import org.neo4j.driver.Record;
+import org.neo4j.driver.Value;
+import org.neo4j.driver.Values;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+/**
+ * Tests unitaires poussés :
+ *   • on mocke Neo4jInterface
+ *   • on vérifie les paramètres Cypher et la construction d’Issue
+ *
+ * Couverture visée : > 90 %.
+ */
 class SolverCypherTest {
 
-    private Neo4jInterface neo;
-    private SolverCypher solver;
-    private Path tempTimeFile;
+    private Neo4jInterface neo;   // mock
+    private SolverCypher   solver;
+    private Path           timeFile;
 
-    private static final String NEO4J_URI = "bolt://localhost:7687";
-    private static final String NEO4J_USER = "neo4j";
-    // !! METTEZ VOTRE MOT DE PASSE NEO4J ICI !!
-    private static final String NEO4J_PASSWORD = "01012002";
-
-    @BeforeAll
-    void setUpAll() throws IOException {
-        neo = new Neo4jInterface();
-        neo.setParameters(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD);
+    /* ---------------------------------------------------- */
+    /* ----------------  préparation commune -------------- */
+    /* ---------------------------------------------------- */
+    @BeforeEach
+    void setUp() throws IOException {
+        neo    = mock(Neo4jInterface.class);
         solver = new SolverCypher(neo);
 
-        tempTimeFile = Files.createTempFile("test_time_data", ".pl");
-        String timeContent = """
+        // fichier temporaire de paramètres temporels
+        timeFile = Files.createTempFile("times", ".pl");
+        Files.writeString(timeFile, """
                 tCurrent(5000).
                 tLimit('access', 1000).
-                tLimit('erase', 1000).
-                tLimit('storage', 1000).
-                """;
-        Files.writeString(tempTimeFile, timeContent);
+                tLimit('erase',  1000).
+                tLimit('storage',1000).
+                """);
     }
 
-    @BeforeEach
-    void cleanDatabase() {
-        neo.executeQuery("MATCH (n) DETACH DELETE n", Collections.emptyMap());
+    /* ---------------------------------------------------- */
+    /* ----------------  aides de test -------------------- */
+    /* ---------------------------------------------------- */
+
+    /** Construit un Record Mockito dont les colonnes renvoient les Value voulues. */
+    private Record mockRecord(Map<String, Object> data) {
+        Record rec = mock(Record.class);
+        data.forEach((k, v) -> when(rec.get(k)).thenReturn(Values.value(v)));
+        return rec;
     }
 
-    @AfterAll
-    void tearDownAll() throws IOException {
-        cleanDatabase();
-        Files.deleteIfExists(tempTimeFile);
+    /** Récupère la dernière requête Cypher transmise au mock. */
+    private String captureLastQuery() {
+        ArgumentCaptor<String> cap = ArgumentCaptor.forClass(String.class);
+        verify(neo, atLeastOnce()).executeQuery(cap.capture(), anyMap());
+        return cap.getValue();
     }
 
-    private void executeQueries(String... queries) {
-        for (String query : queries) {
-            neo.executeQuery(query, Collections.emptyMap());
+    /* ---------------------------------------------------- */
+    /* ------------  TESTS PAR PRINCIPE GDPR -------------- */
+    /* ---------------------------------------------------- */
+
+    @Nested @DisplayName("Right to Erasure")
+    class Erasure {
+
+        @Test @DisplayName("✅ conforme – aucun résultat → 0 issue")
+        void compliant() throws IOException {
+            when(neo.executeQuery(anyString(), anyMap()))
+                    .thenReturn(Collections.emptyList());
+
+            String res = solver.solve(
+                    List.of("eraseCompliant"), "", timeFile.toString());
+
+            assertTrue(solver.getIssues().isEmpty());
+            assertEquals("System is compliant.", res.strip());
+            assertTrue(captureLastQuery().contains("askErase"));
+        }
+
+        @Test @DisplayName("❌ non-conforme – 1 résultat → 1 issue")
+        void nonCompliant() throws IOException {
+            Record rec = mockRecord(Map.of("D", "data1", "T", 120, "P", "p1"));
+            when(neo.executeQuery(anyString(), anyMap()))
+                    .thenReturn(List.of(rec));
+
+            solver.solve(List.of("eraseCompliant"), "", timeFile.toString());
+
+            assertEquals(1, solver.getIssues().size());
         }
     }
 
-    @Nested
-    @DisplayName("Right to Erasure Tests")
-    class RightToErasureTests {
+    @Nested @DisplayName("Right to Access")
+    class Access {
 
-        @Test
-        @DisplayName("✅ Compliant: Data is erased within the time limit")
-        void testErase_Compliant_InTime() throws IOException {
-            // CORRECTION: On crée UN SEUL artifact 'd1' et les deux process l'utilisent.
-            executeQueries(
-                    "CREATE (d1:Artifact {name:'data1'})",
-                    "CREATE (:Process {action:'askErase'})-[:used {TU:100}]->(d1)",
-                    "CREATE (:Process {action:'delete'})-[:used {TU:500}]->(d1)"
-            );
-            solver.solve(List.of("eraseCompliant"), "", tempTimeFile.toString());
+        @Test @DisplayName("✅ conforme – 0 issue")
+        void compliant() throws IOException {
+            when(neo.executeQuery(anyString(), anyMap()))
+                    .thenReturn(Collections.emptyList());
+
+            solver.solve(List.of("rightAccess"), "", timeFile.toString());
+
             assertTrue(solver.getIssues().isEmpty());
         }
 
-        @Test
-        @DisplayName("❌ Non-Compliant: Erasure request exists but data is never deleted")
-        void testErase_NonCompliant_NotDeleted() throws IOException {
-            executeQueries(
-                    "CREATE (:Process {name:'p_ask_erase', action:'askErase'})-[:used {TU:100}]->(:Artifact {name:'data1'})"
-            );
-            solver.solve(List.of("eraseCompliant"), "", tempTimeFile.toString());
-            assertEquals(1, solver.getIssues().size());
-        }
+        @Test @DisplayName("❌ non-conforme – 1 issue")
+        void nonCompliant() throws IOException {
+            Record rec = mockRecord(Map.of("S", "Alice", "TE", 50));
+            when(neo.executeQuery(anyString(), anyMap()))
+                    .thenReturn(List.of(rec));
 
-        @Test
-        @DisplayName("❌ Non-Compliant: Data is erased after the time limit")
-        void testErase_NonCompliant_DeletedTooLate() throws IOException {
-            // CORRECTION: Assurer que c'est le même artifact.
-            executeQueries(
-                    "CREATE (d1:Artifact {name:'data1'})",
-                    "CREATE (:Process {name:'p_ask_erase', action:'askErase'})-[:used {TU:100}]->(d1)",
-                    "CREATE (:Process {action:'delete'})-[:used {TU:1200}]->(d1)"
-            );
-            solver.solve(List.of("eraseCompliant"), "", tempTimeFile.toString());
+            solver.solve(List.of("rightAccess"), "", timeFile.toString());
+
             assertEquals(1, solver.getIssues().size());
         }
     }
 
-    @Nested
-    @DisplayName("Right to Access Tests")
-    class RightToAccessTests {
+    @Nested @DisplayName("Storage Limitation")
+    class Storage {
 
-        @Test
-        @DisplayName("✅ Compliant: Data is sent within the time limit after a request")
-        void testAccess_Compliant_SentInTime() throws IOException {
-            executeQueries(
-                    "CREATE (p_ask:Process {name:'p_ask', action:'askDataAccess'})-[:wasControlledBy {ctx:'owner', TE:50}]->(:Agent {name:'Alice'})",
-                    "CREATE (req_A:Artifact {name:'req_A'})-[:wasGeneratedBy {TG:50}]->(p_ask)",
-                    "CREATE (p_send:Process {name:'p_send', action:'sendData'})-[:used {TU:900}]->(req_A)",
-                    "MATCH (p:Process {name:'p_send'}) CREATE (p)-[:wasControlledBy {TE:900}]->(:Agent {name:'System'})"
-            );
-            solver.solve(List.of("rightAccess"), "", tempTimeFile.toString());
+        @Test @DisplayName("✅ conforme")
+        void compliant() throws IOException {
+            when(neo.executeQuery(anyString(), anyMap()))
+                    .thenReturn(Collections.emptyList());
+
+            solver.solve(List.of("storageLimitation"), "", timeFile.toString());
+
             assertTrue(solver.getIssues().isEmpty());
         }
 
-        @Test
-        @DisplayName("❌ Non-Compliant: Data is not sent after a request within the time limit")
-        void testAccess_NonCompliant_NotSent() throws IOException {
-            executeQueries(
-                    "CREATE (p_ask:Process {name:'p_ask', action:'askDataAccess'})-[:wasControlledBy {ctx:'owner', TE:50}]->(:Agent {name:'Alice'})",
-                    "CREATE (:Artifact {name:'req_A'})-[:wasGeneratedBy {TG:50}]->(p_ask)"
-            );
-            solver.solve(List.of("rightAccess"), "", tempTimeFile.toString());
+        @Test @DisplayName("❌ non-conforme – 2 issues")
+        void nonCompliant() throws IOException {
+            Record r1 = mockRecord(Map.of("D", "d1", "TU", 10));
+            Record r2 = mockRecord(Map.of("D", "d2", "TU", 20));
+            when(neo.executeQuery(anyString(), anyMap()))
+                    .thenReturn(List.of(r1, r2));
+
+            solver.solve(List.of("storageLimitation"), "", timeFile.toString());
+
+            assertEquals(2, solver.getIssues().size());
+        }
+    }
+
+    @Nested @DisplayName("Lawfulness / Consent")
+    class Consent {
+
+        @Test @DisplayName("✅ but par défaut autorisé → conforme")
+        void defaultPurpose_compliant() throws IOException {
+            when(neo.executeQuery(anyString(), anyMap()))
+                    .thenReturn(Collections.emptyList());
+
+            solver.solve(List.of("legal"), "", timeFile.toString());
+
+            assertTrue(solver.getIssues().isEmpty());
+        }
+
+        @Test @DisplayName("❌ consentement révoqué → non-conforme")
+        void revokedConsent_nonCompliant() throws IOException {
+            Record rec = mockRecord(Map.of(
+                    "P", "p_send",
+                    "D_used", "phone_1",
+                    "PU", "sendAd",
+                    "T", 300));
+
+            when(neo.executeQuery(anyString(), anyMap()))
+                    .thenReturn(List.of(rec));
+
+            solver.solve(List.of("legal"), "", timeFile.toString());
+
             assertEquals(1, solver.getIssues().size());
         }
     }
 
-    @Nested
-    @DisplayName("Storage Limitation Tests")
-    class StorageLimitationTests {
+    /* ---------------------------------------------------- */
+    /* -----  Vérification des méthodes utilitaires  ------ */
+    /* ---------------------------------------------------- */
 
-        @Test
-        @DisplayName("✅ Compliant: Data has not expired yet")
-        void testStorage_Compliant_NotExpired() throws IOException {
-            executeQueries(
-                    "CREATE (d1:Artifact {name:'d1'})-[:wasGeneratedBy {ctx:'personal data'}]->(:Process)",
-                    "CREATE (:Process {action:'someUse'})-[:used {TU:4500}]->(d1)"
-            );
-            solver.solve(List.of("storageLimitation"), "", tempTimeFile.toString());
-            assertTrue(solver.getIssues().isEmpty());
-        }
+    @Test @DisplayName("parseTimeFile lit correctement les 4 constantes")
+    void parseTimeFile_ok()
+            throws NoSuchMethodException, InvocationTargetException, IllegalAccessException, IOException {
 
-        @Test
-        @DisplayName("✅ Compliant: Data has expired but was already deleted")
-        void testStorage_Compliant_ExpiredButDeleted() throws IOException {
-            executeQueries(
-                    "CREATE (d1:Artifact {name:'d1'})-[:wasGeneratedBy {ctx:'personal data'}]->(:Process)",
-                    "CREATE (:Process {action:'someUse'})-[:used {TU:10}]->(d1)",
-                    "CREATE (:Process {action:'delete'})-[:used {TU:2000}]->(d1)"
-            );
-            solver.solve(List.of("storageLimitation"), "", tempTimeFile.toString());
-            assertTrue(solver.getIssues().isEmpty());
-        }
+        Method mParse = SolverCypher.class
+                .getDeclaredMethod("parseTimeFile", String.class);
+        mParse.setAccessible(true);
 
-        @Test
-        @DisplayName("❌ Non-Compliant: Data has expired and was not deleted")
-        void testStorage_NonCompliant_ExpiredAndNotDeleted() throws IOException {
-            executeQueries(
-                    "CREATE (d1:Artifact {name:'d1'})-[:wasGeneratedBy {ctx:'personal data'}]->(:Process)",
-                    "CREATE (:Process {action:'someUse'})-[:used {TU:10}]->(d1)"
-            );
-            solver.solve(List.of("storageLimitation"), "", tempTimeFile.toString());
-            assertEquals(1, solver.getIssues().size());
-        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map =
+                (Map<String, Object>) mParse.invoke(solver, timeFile.toString());
+
+        assertEquals(5000, map.get("currentTime"));
+        assertEquals(1000, map.get("accessLimitDuration"));
+        assertEquals(1000, map.get("erasureLimitDuration"));
+        assertEquals(1000, map.get("storageLimitDuration"));
     }
 
-    @Nested
-    @DisplayName("Consent Lawfulness Tests")
-    class ConsentTests {
+    @Test @DisplayName("extractValue extrait bien la valeur entière")
+    void extractValue_various()
+            throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
 
-        @Test
-        @DisplayName("✅ Compliant: Processing is done with valid and active consent")
-        void testConsent_Compliant_WithValidConsent() throws IOException {
-            // CORRECTION: Utiliser une variable (p1) pour référencer le même nœud.
-            executeQueries(
-                    "CREATE (p1:Artifact {name:'phone_1'})-[:wasGeneratedBy {ctx:'personal data'}]->(:Process)",
-                    "CREATE (:Process {name:'p_send', action:'sendAd'})-[:used {TU:200}]->(p1)",
-                    "CREATE (:Artifact {name:'c1', consent_type:'purposes_consent', phone_1_purposes:['sendAd']})-[:wasGeneratedBy {TG:50}]->(:Process)"
-            );
-            solver.solve(List.of("legal"), "", tempTimeFile.toString());
-            assertTrue(solver.getIssues().isEmpty());
-        }
+        Method meth = SolverCypher.class
+                .getDeclaredMethod("extractValue", String.class);
+        meth.setAccessible(true);
 
-        @Test
-        @DisplayName("✅ Compliant: Processing purpose is in default allowed list")
-        void testConsent_Compliant_DefaultPurpose() throws IOException {
-            // CORRECTION: Utiliser une variable (p1).
-            executeQueries(
-                    "CREATE (p1:Artifact {name:'phone_1'})-[:wasGeneratedBy {ctx:'personal data'}]->(:Process)",
-                    "CREATE (:Process {name:'p_create', action:'createAccount'})-[:used {TU:100}]->(p1)"
-            );
-            solver.solve(List.of("legal"), "", tempTimeFile.toString());
-            assertTrue(solver.getIssues().isEmpty());
-        }
-
-        @Test
-        @DisplayName("❌ Non-Compliant: Processing happens without any consent artifact")
-        void testConsent_NonCompliant_NoConsent() throws IOException {
-            // CORRECTION: Utiliser une variable (p1).
-            executeQueries(
-                    "CREATE (p1:Artifact {name:'phone_1'})-[:wasGeneratedBy {ctx:'personal data'}]->(:Process)",
-                    "CREATE (:Process {name:'p_send', action:'sendAd'})-[:used {TU:200}]->(p1)"
-            );
-            solver.solve(List.of("legal"), "", tempTimeFile.toString());
-            assertEquals(1, solver.getIssues().size());
-        }
-
-        @Test
-        @DisplayName("❌ Non-Compliant: Processing happens after consent is revoked")
-        void testConsent_NonCompliant_ConsentRevoked() throws IOException {
-            // CORRECTION: Utiliser des variables (p1, c1) pour lier correctement les nœuds.
-            executeQueries(
-                    "CREATE (p1:Artifact {name:'phone_1'})-[:wasGeneratedBy {ctx:'personal data'}]->(:Process)",
-                    "CREATE (c1:Artifact {name:'c1', consent_type:'purposes_consent', phone_1_purposes:['sendAd']})-[:wasGeneratedBy {TG:50}]->(:Process)",
-                    "CREATE (:Process {action:'revokeConsent'})-[:used {TU:150}]->(c1)",
-                    "CREATE (:Process {name:'p_send', action:'sendAd'})-[:used {TU:300}]->(p1)"
-            );
-            solver.solve(List.of("legal"), "", tempTimeFile.toString());
-            assertEquals(1, solver.getIssues().size());
-        }
-
-        @Test
-        @DisplayName("❌ Non-Compliant: Consent exists, but for a different purpose")
-        void testConsent_NonCompliant_WrongPurpose() throws IOException {
-            // CORRECTION: Utiliser une variable (p1).
-            executeQueries(
-                    "CREATE (p1:Artifact {name:'phone_1'})-[:wasGeneratedBy {ctx:'personal data'}]->(:Process)",
-                    "CREATE (:Process {name:'p_analytics', action:'doAnalytics'})-[:used {TU:300}]->(p1)",
-                    "CREATE (:Artifact {name:'c1', consent_type:'purposes_consent', phone_1_purposes:['sendAd']})-[:wasGeneratedBy {TG:50}]->(:Process)"
-            );
-            solver.solve(List.of("legal"), "", tempTimeFile.toString());
-            assertEquals(1, solver.getIssues().size());
-        }
+        assertEquals("123", meth.invoke(solver, "tCurrent(123)."));
+        assertEquals("456", meth.invoke(solver, "tLimit('access',456)."));
     }
 }

@@ -16,114 +16,118 @@ public class SolverCypher implements SolverInterface {
     // --- NOS 4 REQUÊTES CYPHER FINALES ET VALIDÉES ---
 
     private static final String ERASE_QUERY = """
-            MATCH (p_ask:Process {action: 'askErase'})-[u_ask:used]->(d_target:Artifact)
-            WHERE $currentTime - u_ask.TU >= $erasureLimitDuration
-            AND NOT EXISTS {
-            MATCH (d_target)<-[u_delete:used]-(:Process {action: 'delete'})
-            WHERE u_delete.TU > u_ask.TU AND (u_delete.TU - u_ask.TU) < $erasureLimitDuration
-                    }
-                    RETURN DISTINCT d_target.name AS D, u_ask.TU AS T, p_ask.name AS P
-        """;
-
+MATCH (p_ask:Process {action: 'askErase'})-[u_ask:used]->(d_target:Artifact)
+WHERE $currentTime - u_ask.TU >= $erasureLimitDuration
+  AND NOT EXISTS {
+        MATCH (d_target)<-[u_delete:used]-(:Process {action: 'delete'})
+        WHERE u_delete.TU >  u_ask.TU
+          AND u_delete.TU - u_ask.TU < $erasureLimitDuration
+  }
+RETURN DISTINCT
+       d_target.name AS D,
+       u_ask.TU      AS T,
+       p_ask.name    AS P
+""";
     private static final String ACCESS_QUERY = """
-    // Demande d’accès non satisfaite
-    MATCH (s_demandeur:Agent)<-[wcb_ask:wasControlledBy]-
-          (p_demande:Process {action:'askDataAccess'})
-    WHERE wcb_ask.ctx = 'owner'
-    MATCH (a_demande:Artifact)-[wgb_ask:wasGeneratedBy]->(p_demande)   // <-- sens corrigé
-    WHERE wcb_ask.TE = wgb_ask.TG
-    WITH s_demandeur, a_demande, wcb_ask.TE AS TE_demande
-    WHERE $currentTime - TE_demande >= $accessLimitDuration
-      AND NOT EXISTS {
+// ---------- ACCESS_QUERY ----------
+MATCH (s_demandeur:Agent)<-[wcb_ask:wasControlledBy {ctx:'owner'}]-
+      (p_demande:Process {action:'askDataAccess'})
+
+MATCH (a_demande:Artifact)-[wgb_ask:wasGeneratedBy]->(p_demande)
+WHERE wcb_ask.TE = wgb_ask.TG          // TE_demande = horodatage de la demande
+
+WITH s_demandeur, a_demande, wcb_ask.TE AS TE_demande
+WHERE $currentTime - TE_demande >= $accessLimitDuration   // délai dépassé
+
+  // Aucun « sendData » couvrant la demande dans le délai :
+  AND NOT EXISTS {
         MATCH (p_envoi:Process {action:'sendData'})-[u_send:used]->(a_demande)
-        MATCH (agent_systeme:Agent)<-[wcb_send:wasControlledBy]-(p_envoi)
-        WHERE wcb_send.ctx = 'owner'
-          AND wcb_send.TE > TE_demande
+        MATCH (:Agent)<-[wcb_send:wasControlledBy {ctx:'owner'}]-(p_envoi)
+        WHERE wcb_send.TE > TE_demande
           AND wcb_send.TE - TE_demande < $accessLimitDuration
-      }
-    RETURN DISTINCT s_demandeur.name AS S,
-                    TE_demande          AS TE
-    """;
+  }
+
+RETURN DISTINCT s_demandeur.name AS S,
+                TE_demande        AS TE
+""";
 
     private static final String CONSENT_QUERY = """
-//  -------- Usage d’une donnée perso sans consentement valable --------
-MATCH (p_using_data:Process)-[u:used]->(d_artifact_used:Artifact)
-WITH p_using_data,
-     d_artifact_used,
-     p_using_data.action AS PU,
-     u.TU                AS T_utilisation
+// ── Usage d’une donnée perso sans consentement valable ──
+MATCH (p_use:Process)-[u:used]->(d_used:Artifact)
+WITH p_use, d_used, p_use.action AS PU, u.TU AS TU_use
 WHERE NOT (PU IN $defaultPurposesList)
 
-/* --------- 1. retrouver la donnée perso source --------- */
+/* 1. remonter jusqu’à la donnée personnelle source */
 CALL {
-    WITH d_artifact_used
-    MATCH (d_artifact_used)-[:wasGeneratedBy|used*0..]-(dp_source:Artifact)
+    WITH d_used
+    MATCH (d_used)-[:wasGeneratedBy|used|wasDerivedFrom*0..]-(dp_src:Artifact)
           -[wgb_src:wasGeneratedBy]->(:Process)
-    WHERE wgb_src.ctx = 'personal data'          // <<< ctx on RELATIONSHIP
-    RETURN DISTINCT dp_source
+    WHERE wgb_src.ctx = 'personal data'
+    RETURN DISTINCT dp_src
 }
-WITH p_using_data, d_artifact_used, PU, T_utilisation, dp_source
 
-/* --------- 2. pas de consentement valable ? --------- */
+WITH p_use, d_used, dp_src, PU, TU_use
+
+/* 2. vérifier qu’aucun consentement valable ne couvre cet usage */
 WHERE NOT EXISTS {
     MATCH (c:Artifact {consent_type:'purposes_consent'})
           -[wgb_c:wasGeneratedBy]->(:Process)
-    WHERE wgb_c.TG < T_utilisation
-      AND c[dp_source.name + '_purposes'] IS NOT NULL
-      AND PU IN c[dp_source.name + '_purposes']
+    WHERE wgb_c.TG < TU_use
+      AND c[dp_src.name + '_purposes'] IS NOT NULL
+      AND PU IN c[dp_src.name + '_purposes']
 
-      /* pas de révocation de ce consentement avant l’usage */
+      // pas de révocation avant l’usage
       AND NOT EXISTS {
-          MATCH (:Process {action:'revokeConsent'})-[u_rev:used]->(c)
-          WHERE u_rev.TU >= wgb_c.TG
-            AND u_rev.TU <  T_utilisation
+            MATCH (:Process)-[u_rev:used {ctx:'revokeConsent'}]->(c)
+            WHERE u_rev.TU >= wgb_c.TG AND u_rev.TU < TU_use
       }
 
-      /* pas d’autre consentement plus récent et toujours valide */
+      // pas de consentement plus récent et valide avant l’usage
       AND NOT EXISTS {
-          MATCH (c_next:Artifact {consent_type:'purposes_consent'})
-                -[wgb_next:wasGeneratedBy]->(:Process)
-          WHERE c_next <> c
-            AND wgb_next.TG > wgb_c.TG
-            AND wgb_next.TG < T_utilisation
-            AND c_next[dp_source.name + '_purposes'] IS NOT NULL
-            AND PU IN c_next[dp_source.name + '_purposes']
-            AND NOT EXISTS {
-                MATCH (:Process {action:'revokeConsent'})-[u_rev2:used]->(c_next)
-                WHERE u_rev2.TU >= wgb_next.TG
-                  AND u_rev2.TU <  T_utilisation
-            }
+            MATCH (c2:Artifact {consent_type:'purposes_consent'})
+                  -[wgb2:wasGeneratedBy]->(:Process)
+            WHERE c2 <> c
+              AND wgb2.TG >  wgb_c.TG
+              AND wgb2.TG <  TU_use
+              AND c2[dp_src.name + '_purposes'] IS NOT NULL
+              AND PU IN c2[dp_src.name + '_purposes']
+              AND NOT EXISTS {
+                    MATCH (:Process)-[u_rev2:used {ctx:'revokeConsent'}]->(c2)
+                    WHERE u_rev2.TU >= wgb2.TG AND u_rev2.TU < TU_use
+              }
       }
 }
 
-RETURN DISTINCT
-       p_using_data.name    AS P,
-       d_artifact_used.name AS D_used,
-       PU,
-       T_utilisation        AS T
+RETURN DISTINCT p_use.name AS P,
+                d_used.name AS D_used,
+                PU,
+                TU_use AS T
 """;
 
     private static final String STORAGE_QUERY = """
-    // Dépassement de délai de conservation
-    MATCH (p_usage:Process)-[u_usage:used]->(artifact_used:Artifact)
-    WHERE p_usage.action <> 'delete'
-    WITH artifact_used, max(u_usage.TU) AS actual_last_usage_TU
-    WHERE $currentTime - actual_last_usage_TU >= $storageLimitDuration
-    CALL {
-        WITH artifact_used
-        MATCH (artifact_used)-[:wasGeneratedBy|used*0..]-(dp_source:Artifact)
-        WHERE EXISTS { (dp_source)-[:wasGeneratedBy]->(:Process {ctx:'personal data'}) }
-        RETURN DISTINCT dp_source
-    }
-    WITH dp_source, artifact_used, actual_last_usage_TU
-    WHERE NOT EXISTS {
-        MATCH (p_delete:Process {action:'delete'})-[u_delete:used]->(dp_source)
-        WHERE u_delete.TU > actual_last_usage_TU
-          AND u_delete.TU - actual_last_usage_TU < $storageLimitDuration
-    }
-    RETURN DISTINCT artifact_used.name   AS D,
-                    actual_last_usage_TU AS TU
-    """;
+// Dépassement de délai de conservation
+MATCH (art:Artifact)<-[u:used]-(p:Process)
+WHERE p.action <> 'delete'
+
+WITH art, max(u.TU) AS last_TU                        // on garde `art`
+WHERE $currentTime - last_TU >= $storageLimitDuration
+
+// vérifier que l’artefact (ou l’une de ses dérivées) est perso
+AND EXISTS {
+    MATCH (art)-[:wasGeneratedBy|used|wasDerivedFrom*0..]-
+          (:Artifact)-[r:wasGeneratedBy]->()
+    WHERE r.ctx = 'personal data'
+}
+
+// vérifier qu’il n’a pas été supprimé à temps
+AND NOT EXISTS {
+    MATCH (art)<-[u_del:used]-(:Process {action:'delete'})
+    WHERE u_del.TU > last_TU
+      AND u_del.TU - last_TU < $storageLimitDuration
+}
+
+RETURN DISTINCT art.name AS D, last_TU AS TU
+""";
 
 
     public SolverCypher(Neo4jInterface neo) {

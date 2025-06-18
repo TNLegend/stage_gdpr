@@ -1,5 +1,104 @@
 <!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>Neovis.js Simple Example</title>
-    <script src="https://unpkg.com/neovis.js@2.1.0"></script>
+    <meta charset="UTF-8">
+    <title>Neovis.js – compact labels, full hover</title>
+    <style>
+        html,body { font:16pt arial }
+        #viz      { width:900px; height:700px; border:1px solid lightgray;
+                    font:22pt arial }
+    </style>
 </head>
+
+<body>
+<div id="viz"></div>
+
+<script src="https://unpkg.com/neovis.js@2.1.0"></script>
+<script>
+
+    let neoViz;
+
+    function draw (serverUrl, serverUser, serverPassword) {
+
+        const config = {
+            containerId : "viz",
+
+            neo4j : {
+                serverUrl      : serverUrl,
+                serverUser     : serverUser,
+                serverPassword : serverPassword
+            },
+
+            visConfig : {
+                nodes : { shape:"box" },
+                edges : {
+                    arrows:{ to:{ enabled:true, type:"arrow" } }
+                }
+            },
+
+            /* original compact labels ----------------------------------------- */
+            labels : {
+                "Agent" : {
+                    "label": "name",
+                    "color": "#FFC300" // Jaune
+                },
+                "Artifact" : {
+                    "label": "name",
+                    "shape": "circle",
+                    "color": "#C70039" // Rouge
+                },
+                "Process" :  {
+                    "label": "name",
+                    "color": "#3375FF" // Bleu
+                }
+            },
+           relationships : {
+    wasGeneratedBy  : { },   // ← on enlève label:"ctx"
+    wasControlledBy : { },
+    used            : { },
+    wasTriggeredBy  : { },
+    wasDerivedFrom  : { }
+},
+
+
+            initialCypher : "MATCH (n)-[r]->(m) RETURN n,r,m"
+        };
+
+        /* -------- full-properties tooltip on hover -------- */
+        const fullDetails = item =>
+            Object.entries(item.properties)
+                  .map(([k,v]) => k + ": " + v)
+                  .join('\n');        // “\n” -> new line in vis tooltip
+
+        /* attach to every label & relationship */
+        Object.values(config.labels).forEach(l => {
+            l[NeoVis.NEOVIS_ADVANCED_CONFIG] = { function:{ title:fullDetails } };
+        });
+
+        // On définit une palette de couleurs
+        const colorMap = {
+            "wasGeneratedBy":  "#C70039", // Rouge
+            "wasControlledBy": "#3357FF", // Bleu
+            "used":            "#33FF57", // Vert
+            "wasTriggeredBy":  "#F9C74F", // Jaune
+            "wasDerivedFrom":  "#90BE6D"  // Vert pâle
+        };
+
+        Object.values(config.relationships).forEach(r => {
+    r[NeoVis.NEOVIS_ADVANCED_CONFIG] = {
+        function: {
+            label: rel => rel.type,
+            title: fullDetails,
+            color: rel => colorMap[rel.type] || '#848484'
+        }
+    };
+});
+
+        /* render ---------------------------------------------------------------- */
+        neoViz = new NeoVis.default(config);
+        neoViz.render();
+    }
+</script>
+</body>
+</html>
+
