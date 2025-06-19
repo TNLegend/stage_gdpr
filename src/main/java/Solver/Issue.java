@@ -100,31 +100,55 @@ public class Issue {
         };
     }
 
+    // Dans la classe Solver.Issue, remplacez la méthode toCypherQuery existante par celle-ci :
+
     /**
-     * Génère une requête Cypher simple pour visualiser le contexte d'une issue.
-     * Adaptée pour fonctionner avec la nouvelle map de propriétés.
+     * Génère une requête Cypher pour visualiser le contexte d'une issue,
+     * en incluant maintenant l'agent qui contrôle le processus.
      */
     public String toCypherQuery() {
-        final String P  = quoted(properties.get("P"));
-        final String D  = quoted(properties.getOrDefault("D", properties.get("D_used"))); // Gère les deux noms de clé possibles pour la donnée
-        final String S  = quoted(properties.get("S"));
-        final String T  = properties.get("T") != null ? properties.get("T").toString() : properties.getOrDefault("TU", properties.get("TE")).toString();
+        // Les variables sont extraites des propriétés de l'issue
+        final String P = quoted(properties.get("P"));
+        final String D = quoted(properties.getOrDefault("D", properties.get("D_used")));
+        final String S = quoted(properties.get("S"));
+        final String T = properties.get("T") != null
+                ? properties.get("T").toString()
+                : properties.getOrDefault("TU", properties.get("TE")).toString();
 
-        String raw;
+        String rawQuery;
         switch (type) {
-            case LEGAL ->
-                    raw = String.format("MATCH path = (p:Process {name:%s})-[u:used]-(d:Artifact {name:%s}) WHERE u.TU = %s RETURN path", P, D, T);
-            case RIGHT_TO_ACCESS ->
-                    raw = String.format("MATCH path = (a:Agent {name:%s})<-[r:wasControlledBy]-(p:Process {action:'askDataAccess'}) WHERE r.TE = %s RETURN path", S, T);
-            case RIGHT_TO_ERASURE ->
-                    raw = String.format("MATCH path = (p:Process {name:%s})-[r:used]-(d:Artifact {name:%s}) WHERE r.TU = %s RETURN path", P, D, T);
-            case STORAGE_LIMITATION ->
-                    raw = String.format("MATCH path = (d:Artifact {name:%s})<-[r:used]-() WHERE r.TU = %s RETURN path", D, T);
-            default ->
-                    raw = "MATCH (n)-[r]-(m) RETURN n,r,m";
+            case LEGAL:
+            case RIGHT_TO_ERASURE:
+                // CHANGEMENT : Le chemin inclut maintenant (Agent)-[:wasControlledBy]->(Process)
+                rawQuery = String.format(
+                        "MATCH path = (agent:Agent)<-[:wasControlledBy]-(p:Process {name:%s})-[r:used]->(d:Artifact {name:%s}) WHERE r.TU = %s RETURN path",
+                        P, D, T
+                );
+                break;
+
+            case RIGHT_TO_ACCESS:
+                // PAS DE CHANGEMENT : L'agent était déjà le point de départ de la requête.
+                rawQuery = String.format(
+                        "MATCH path = (a:Agent {name:%s})<-[r:wasControlledBy]-(p:Process {action:'askDataAccess'}) WHERE r.TE = %s RETURN path",
+                        S, T
+                );
+                break;
+
+            case STORAGE_LIMITATION:
+                // CHANGEMENT : Le chemin identifie maintenant le processus et l'agent qui l'a contrôlé.
+                rawQuery = String.format(
+                        "MATCH path = (agent:Agent)<-[:wasControlledBy]-(p:Process)-[r:used]->(d:Artifact {name:%s}) WHERE r.TU = %s RETURN path",
+                        D, T
+                );
+                break;
+
+            default:
+                rawQuery = "MATCH (n)-[r]-(m) RETURN n,r,m";
+                break;
         }
-        String finalQuery = raw.replaceAll("\\s+", " ").trim();
-        return finalQuery;
+
+        // Nettoyage de la requête pour éviter les erreurs de syntaxe dues aux espaces.
+        return rawQuery.replaceAll("\\s+", " ").trim();
     }
 
     // --- MÉTHODES UTILITAIRES ---

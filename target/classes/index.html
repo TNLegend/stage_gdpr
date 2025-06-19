@@ -38,20 +38,35 @@
 
             /* original compact labels ----------------------------------------- */
             labels : {
-                "Agent" : {
-                    "label": "name",
-                    "color": "#FFC300" // Jaune
-                },
-                "Artifact" : {
-                    "label": "name",
-                    "shape": "circle",
-                    "color": "#C70039" // Rouge
-                },
-                "Process" :  {
-                    "label": "name",
-                    "color": "#3375FF" // Bleu
-                }
-            },
+  Agent : {
+    label: "name",
+    [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
+      static: {           // <-- propriétés statiques envoyées à Vis.js
+        color: "#FFC300" // Jaune
+      }
+    }
+  },
+
+  Artifact : {
+    label: "name",
+    shape: "circle",
+    [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
+      static: {
+        color: "#F05252" // Rouge
+      }
+    }
+  },
+
+  Process : {
+    label: "name",
+    [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
+      static: {
+        color: "#3375FF" // Bleu
+      }
+    }
+  }
+},
+
            relationships : {
     wasGeneratedBy  : { },   // ← on enlève label:"ctx"
     wasControlledBy : { },
@@ -72,8 +87,12 @@
 
         /* attach to every label & relationship */
         Object.values(config.labels).forEach(l => {
-            l[NeoVis.NEOVIS_ADVANCED_CONFIG] = { function:{ title:fullDetails } };
-        });
+    const adv = l[NeoVis.NEOVIS_ADVANCED_CONFIG]      // ← récupère l’existant
+              ||= {};                                 //   ou crée-le une seule fois
+    adv.function = {                                  // ← on complète
+        title: fullDetails
+    };
+});
 
         // On définit une palette de couleurs
         const colorMap = {

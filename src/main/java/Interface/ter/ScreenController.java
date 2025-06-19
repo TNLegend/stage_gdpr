@@ -22,10 +22,8 @@ import javafx.scene.web.WebEngine;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
+
 import javafx.concurrent.Worker;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
@@ -441,6 +439,44 @@ public class ScreenController {
         screenMap.put("resultsScreen", resultsVBox);
     }
 
+    /**
+     * Exécute une requête Cypher et imprime ses résultats bruts dans la console.
+     * @param query La requête à exécuter pour le débogage.
+     */
+    private void printQueryResultsToConsole(String query) {
+        System.out.println("\n-------------------------------------------------");
+        System.out.println("--- DEBUGGING SUBGRAPH DATA IN CONSOLE ---");
+        System.out.println("Query: " + query);
+
+        try {
+            if (neo == null) {
+                System.out.println("--> Neo4j connection not available. Cannot fetch data for console.");
+                return;
+            }
+
+            // Exécute la requête pour récupérer les données
+            List<org.neo4j.driver.Record> records = neo.executeQuery(query, Collections.emptyMap());
+
+            if (records.isEmpty()) {
+                System.out.println("--> Query returned no results for console display.");
+            } else {
+                System.out.println("--> Query Results (" + records.size() + " rows found):");
+                int recordCounter = 1;
+                for (org.neo4j.driver.Record record : records) {
+                    System.out.println("    [Record " + recordCounter++ + "]");
+                    record.fields().forEach(field -> {
+                        String key = field.key();
+                        Object value = field.value().asObject();
+                        System.out.println(String.format("      - %s: %s", key, value));
+                    });
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Error during console debug query execution: " + e.getMessage());
+        } finally {
+            System.out.println("-------------------------------------------------\n");
+        }
+    }
 
 
 
@@ -451,6 +487,7 @@ public class ScreenController {
      * @param query CYPHER query stating the GraphDB elements to display
      */
     public void initGraphVizScreen(String query) {
+        printQueryResultsToConsole(query);
         VBox graphVizScreen = new VBox(10);
         graphVizScreen.setPadding(new Insets(20, 20, 20, 20));
         HBox graphVizAndIssuesScreen = new HBox(10);
