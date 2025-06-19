@@ -2,6 +2,7 @@ package Solver;
 
 import GraphDB.Neo4jInterface;
 import org.neo4j.driver.Result;
+import org.neo4j.driver.SessionConfig;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -15,120 +16,134 @@ public class SolverCypher implements SolverInterface {
 
     // --- NOS 4 REQUÊTES CYPHER FINALES ET VALIDÉES ---
 
+    /*  ERASE_QUERY_FAST  – O( nb(askErase) × petits sous-ensembles ) */
     private static final String ERASE_QUERY = """
-MATCH (p_ask:Process {action: 'askErase'})-[u_ask:used]->(d_target:Artifact)
-WHERE $currentTime - u_ask.TU >= $erasureLimitDuration
-  AND NOT EXISTS {
-        MATCH (d_target)<-[u_delete:used]-(:Process {action: 'delete'})
-        WHERE u_delete.TU >  u_ask.TU
-          AND u_delete.TU - u_ask.TU < $erasureLimitDuration
-  }
-RETURN DISTINCT
-       d_target.name AS D,
-       u_ask.TU      AS T,
-       p_ask.name    AS P
+MATCH (p_ask:Process {action:'askErase'})-[u_ask:used]->(d:Artifact)
+WHERE $currentTime - u_ask.TU >= $erasureLimitDuration          // fenêtre écoulée
+
+AND NOT EXISTS {
+      MATCH (d)<-[u_del:used]-(:Process {action:'delete'})
+      WHERE u_del.TU >= u_ask.TU                                // après la demande
+        AND u_del.TU  < u_ask.TU + $erasureLimitDuration        // avant la deadline
+}
+RETURN DISTINCT d.name AS D,
+                u_ask.TU AS T,
+                p_ask.name AS P
 """;
     private static final String ACCESS_QUERY = """
-// ---------- ACCESS_QUERY ----------
-MATCH (s_demandeur:Agent)<-[wcb_ask:wasControlledBy {ctx:'owner'}]-
-      (p_demande:Process {action:'askDataAccess'})
+// ---------------- ACCESS_QUERY (optimisée & équivalente) ----------------
+MATCH (pAsk:Process {action:'askDataAccess'})
+      -[wcbAsk:wasControlledBy {ctx:'owner'}]->(subject:Agent)
+WITH pAsk, subject, wcbAsk.TE AS tReq
+WHERE $currentTime - tReq >= $accessLimitDuration           // délai écoulé
 
-MATCH (a_demande:Artifact)-[wgb_ask:wasGeneratedBy]->(p_demande)
-WHERE wcb_ask.TE = wgb_ask.TG          // TE_demande = horodatage de la demande
+// artefact-requête généré exactement à tReq
+MATCH (req:Artifact)-[wgb:wasGeneratedBy]->(pAsk)
+WHERE wgb.TG = tReq                                         // jointure ferme
+  AND NOT EXISTS {                                          // aucun envoi valable
+        MATCH (pSend:Process {action:'sendData'})
+              -[uSend:used]->(req)                          // même artefact
+        WHERE uSend.TU  >  tReq
+          AND uSend.TU  -  tReq < $accessLimitDuration      // dans la fenêtre
+      }
 
-WITH s_demandeur, a_demande, wcb_ask.TE AS TE_demande
-WHERE $currentTime - TE_demande >= $accessLimitDuration   // délai dépassé
+RETURN DISTINCT subject.name AS S ,
+                tReq              AS TE
 
-  // Aucun « sendData » couvrant la demande dans le délai :
-  AND NOT EXISTS {
-        MATCH (p_envoi:Process {action:'sendData'})-[u_send:used]->(a_demande)
-        MATCH (:Agent)<-[wcb_send:wasControlledBy {ctx:'owner'}]-(p_envoi)
-        WHERE wcb_send.TE > TE_demande
-          AND wcb_send.TE - TE_demande < $accessLimitDuration
-  }
-
-RETURN DISTINCT s_demandeur.name AS S,
-                TE_demande        AS TE
 """;
 
     private static final String CONSENT_QUERY = """
-// ── Usage d’une donnée perso sans consentement valable ──
+/* ─────────────────────────────────────────────────────────────────────────────
+   AVANT la première exécution, créez les index une seule fois :
+
+   CREATE INDEX idx_proc_action       IF NOT EXISTS FOR (p:Process)  ON (p.action);
+   CREATE INDEX idx_art_type          IF NOT EXISTS FOR (a:Artifact) ON (a.type);
+   CREATE INDEX idx_art_cons_type     IF NOT EXISTS FOR (a:Artifact) ON (a.consent_type);
+   CREATE INDEX idx_wgb_TG            IF NOT EXISTS FOR ()-[r:wasGeneratedBy]-() ON (r.TG);
+   CREATE INDEX idx_used_TU           IF NOT EXISTS FOR ()-[r:used]-()           ON (r.TU);
+            
+   ───────────────────────────────────────────────────────────────────────────── */
+/* =====================================================================
+   CONSENT_QUERY  
+   ===================================================================== */
 MATCH (p_use:Process)-[u:used]->(d_used:Artifact)
-WITH p_use, d_used, p_use.action AS PU, u.TU AS TU_use
-WHERE NOT (PU IN $defaultPurposesList)
+WHERE NOT p_use.action IN $defaultPurposesList          // 1) action non triviale
 
-/* 1. remonter jusqu’à la donnée personnelle source */
+/* ── 2) remonter jusqu’à UNE racine de donnée personnelle ───────────── */
 CALL {
-    WITH d_used
-    MATCH (d_used)-[:wasGeneratedBy|used|wasDerivedFrom*0..]-(dp_src:Artifact)
-          -[wgb_src:wasGeneratedBy]->(:Process)
-    WHERE wgb_src.ctx = 'personal data'
-    RETURN DISTINCT dp_src
+  WITH d_used
+  MATCH (d_used)-[:wasGeneratedBy|used|wasDerivedFrom*0..]-
+        (root:Artifact {type:'personal_data'})          // ← liaison non orientée
+  RETURN root LIMIT 1                                           // 1ʳᵉ racine suffit
+  
 }
 
-WITH p_use, d_used, dp_src, PU, TU_use
+/* ── 3) consentement valable le plus récent avant l’usage ───────────── */
+WITH p_use, u.TU AS TU_use, p_use.action AS PU,
+     d_used, root
+OPTIONAL MATCH (c:Artifact {consent_type:'purposes_consent'})
+      -[wgb:wasGeneratedBy]->(:Process)
+WHERE wgb.TG < TU_use
+  AND PU IN c[root.name + '_purposes']
 
-/* 2. vérifier qu’aucun consentement valable ne couvre cet usage */
-WHERE NOT EXISTS {
-    MATCH (c:Artifact {consent_type:'purposes_consent'})
-          -[wgb_c:wasGeneratedBy]->(:Process)
-    WHERE wgb_c.TG < TU_use
-      AND c[dp_src.name + '_purposes'] IS NOT NULL
-      AND PU IN c[dp_src.name + '_purposes']
-
-      // pas de révocation avant l’usage
-      AND NOT EXISTS {
-            MATCH (:Process)-[u_rev:used {ctx:'revokeConsent'}]->(c)
-            WHERE u_rev.TU >= wgb_c.TG AND u_rev.TU < TU_use
+  // pas de révocation couvrant l’intervalle
+  AND NOT EXISTS {
+        MATCH (:Process)-[u_rev:used {ctx:'revokeConsent'}]->(c)
+        WHERE u_rev.TU >= wgb.TG AND u_rev.TU < TU_use
       }
 
-      // pas de consentement plus récent et valide avant l’usage
-      AND NOT EXISTS {
-            MATCH (c2:Artifact {consent_type:'purposes_consent'})
-                  -[wgb2:wasGeneratedBy]->(:Process)
-            WHERE c2 <> c
-              AND wgb2.TG >  wgb_c.TG
-              AND wgb2.TG <  TU_use
-              AND c2[dp_src.name + '_purposes'] IS NOT NULL
-              AND PU IN c2[dp_src.name + '_purposes']
-              AND NOT EXISTS {
-                    MATCH (:Process)-[u_rev2:used {ctx:'revokeConsent'}]->(c2)
-                    WHERE u_rev2.TU >= wgb2.TG AND u_rev2.TU < TU_use
-              }
-      }
-}
+WITH p_use, TU_use, PU, d_used,
+     c ORDER BY wgb.TG DESC
+WITH p_use, TU_use, PU, d_used,
+     collect(c)[0] AS c_latest            // le consentement le + récent
 
-RETURN DISTINCT p_use.name AS P,
-                d_used.name AS D_used,
-                PU,
-                TU_use AS T
+/* ── 4) signaler les usages sans consentement ───────────────────────── */
+WHERE c_latest IS NULL
+RETURN DISTINCT
+       p_use.name  AS P,
+       d_used.name AS D,
+       PU          AS PU,
+       TU_use      AS T
+ORDER BY T;
+
 """;
 
     private static final String STORAGE_QUERY = """
-// Dépassement de délai de conservation
+/* =====================================================================
+   STORAGE_QUERY — équivalent à storageLimitation(D,TU) en Prolog
+   ---------------------------------------------------------------------
+   Hypothèses d’index déjà créés manuellement :
+     CREATE INDEX idx_proc_action       IF NOT EXISTS FOR (p:Process)  ON (p.action);
+     CREATE INDEX idx_art_type          IF NOT EXISTS FOR (a:Artifact) ON (a.type);
+   ===================================================================== */
 MATCH (art:Artifact)<-[u:used]-(p:Process)
-WHERE p.action <> 'delete'
 
-WITH art, max(u.TU) AS last_TU                        // on garde `art`
-WHERE $currentTime - last_TU >= $storageLimitDuration
+/* ── une seule agrégation balaye TOUTES les utilisations de l’artefact ── */
+WITH art,
+     max( CASE WHEN p.action <> 'delete' THEN u.TU END ) AS last_use,   // dernier usage « normal »
+     max( CASE WHEN p.action  = 'delete' THEN u.TU END ) AS last_del    // dernier delete éventuel
 
-// vérifier que l’artefact (ou l’une de ses dérivées) est perso
-AND EXISTS {
-    MATCH (art)-[:wasGeneratedBy|used|wasDerivedFrom*0..]-
-          (:Artifact)-[r:wasGeneratedBy]->()
-    WHERE r.ctx = 'personal data'
-}
+/* ── 1) délai de conservation dépassé ────────────────────────────────── */
+WHERE last_use IS NOT NULL
+  AND $currentTime - last_use >= $storageLimitDuration
 
-// vérifier qu’il n’a pas été supprimé à temps
-AND NOT EXISTS {
-    MATCH (art)<-[u_del:used]-(:Process {action:'delete'})
-    WHERE u_del.TU > last_TU
-      AND u_del.TU - last_TU < $storageLimitDuration
-}
+/* ── 2) pas de suppression effectuée à temps ─────────────────────────── */
+  AND ( last_del IS NULL                // jamais supprimé
+        OR last_del - last_use >= $storageLimitDuration )
 
-RETURN DISTINCT art.name AS D, last_TU AS TU
+/* ── 3) l’artefact (ou un ancêtre) est une donnée personnelle ─────────── */
+  AND EXISTS {
+        MATCH (art)-[:wasGeneratedBy|used|wasDerivedFrom*0..]->
+              (:Artifact)-[wgb:wasGeneratedBy]->(:Process)
+        WHERE wgb.ctx = 'personal data'
+        RETURN 1 LIMIT 1                        // stoppe l’expansion dès qu’un ancêtre perso est trouvé
+  }
+
+/* ── 4) signal de non-conformité ─────────────────────────────────────── */
+RETURN DISTINCT art.name AS D, last_use AS TU
+ORDER BY TU;
+
 """;
-
 
     public SolverCypher(Neo4jInterface neo) {
         this.neo = neo;
@@ -146,17 +161,20 @@ RETURN DISTINCT art.name AS D, last_TU AS TU
         timeParams.put("defaultPurposesList", List.of("consent", "delete", "askErase", "sendData", "askDataAccess", "updateConsent", "accessWebPage", "updateData", "createAccount", "login"));
 
         // 3. Exécuter les requêtes
-        for (String principleName : principles) {
-            Issue.IssueType issueType = Issue.IssueType.fromString(principleName);
-            String query = getCypherQueryForPrinciple(issueType);
+        try (var session = neo.getDriver().session(SessionConfig.forDatabase("neo4j"))) {
 
-            if (query != null) {
-                // CHANGEMENT : On récupère maintenant une List<Record>
-                List<org.neo4j.driver.Record> records = neo.executeQuery(query, timeParams);
+            for (String principleName : principles) {
 
-                // On parcourt la liste avec une boucle for-each standard
-                for (org.neo4j.driver.Record record : records) {
-                    issues.add(new Issue(issueType, record));
+                Issue.IssueType issueType = Issue.IssueType.fromString(principleName);
+                String query = getCypherQueryForPrinciple(issueType);
+                if (query == null) continue;
+
+                /* ⬇️  UTILISER le même session, pas neo.executeQuery() */
+                List<org.neo4j.driver.Record> records =
+                        session.executeRead(tx -> neo.runReadQuery(tx, query, timeParams));
+
+                for (org.neo4j.driver.Record rec : records) {
+                    issues.add(new Issue(issueType, rec));
                 }
             }
         }

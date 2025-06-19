@@ -92,7 +92,7 @@ public class Issue {
 
         return switch (type) {
             // Note : Pour 'legal', la clé est maintenant 'D_used' pour correspondre à notre requête Cypher.
-            case LEGAL -> String.format(template, id, safe(properties.get("P")), safe(properties.get("D_used")), safe(properties.get("PU")), safe(properties.get("T")));
+            case LEGAL -> String.format(template, id, safe(properties.get("P")), safe(properties.get("D")), safe(properties.get("PU")), safe(properties.get("T")));
             case RIGHT_TO_ACCESS -> String.format(template, id, safe(properties.get("S")), safe(properties.get("TE")));
             case RIGHT_TO_ERASURE -> String.format(template, id, safe(properties.get("D")), safe(properties.get("T")));
             case STORAGE_LIMITATION -> String.format(template, id, safe(properties.get("D")), safe(properties.get("TU"))); // TU pour Storage

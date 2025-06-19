@@ -15,10 +15,11 @@ import java.util.Objects;
 
 import static com.sun.javafx.scene.control.skin.Utils.getResource;
 
-public class Neo4jInterface {
+public class Neo4jInterface implements AutoCloseable {
     private String uri;
     private String user;
     private String password;
+    private Driver  driver;
     public final String generatedPrologGraphPath = "src/main/resources/prov_graph.pl";
 
     public String getUri() { return uri; }
@@ -31,6 +32,25 @@ public class Neo4jInterface {
         this.uri = uri;
         this.user = user;
         this.password = password;
+        if (driver != null) driver.close();               // reconfigure ?
+        driver = GraphDatabase.driver(uri, AuthTokens.basic(user, password));
+        ensureIndexes();
+    }
+
+    private void ensureIndexes() {
+        try ( var session = driver.session(SessionConfig.forDatabase("neo4j")) ) {
+            session.writeTransaction(tx -> {
+                // Notice: name BEFORE IF NOT EXISTS
+                tx.run("CREATE INDEX idx_proc_action    IF NOT EXISTS FOR (p:Process)  ON (p.action)");
+                tx.run("CREATE INDEX idx_art_type       IF NOT EXISTS FOR (a:Artifact) ON (a.type)");
+                tx.run("CREATE INDEX idx_art_cons_type  IF NOT EXISTS FOR (a:Artifact) ON (a.consent_type)");
+                tx.run("CREATE INDEX idx_wgb_TG         IF NOT EXISTS FOR ()-[r:wasGeneratedBy]-() ON (r.TG)");
+                tx.run("CREATE INDEX idx_used_TU        IF NOT EXISTS FOR ()-[r:used]-()           ON (r.TU)");
+                // optional: block until online
+                tx.run("CALL db.awaitIndexes()");
+                return null;
+            });
+        }
     }
 
     public void retrievePrologPG(){
@@ -41,6 +61,10 @@ public class Neo4jInterface {
         }
     }
 
+    /* ⚙️ accès au driver pour Solver */
+    public Driver getDriver() { return driver; }
+
+
     public void retrieveGraphDB(String path){
         try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(user, password))) {
             driver.verifyConnectivity();
@@ -48,26 +72,24 @@ public class Neo4jInterface {
             PrologToGraphDB.convert(driver, path);
         }
     }
+    /* ⚙️ nouvelle méthode, lecture seule */
+    public List<Record> runReadQuery(TransactionContext tx,
+                                     String cypher,
+                                     Map<String,Object> params) {
+        return tx.run(cypher, params).list();
+    }
 
-    /**
-     * MODIFIÉ : Exécute une requête Cypher et retourne une LISTE de Records.
-     * La conversion est faite ici pour éviter l'erreur "ResultConsumedException".
-     */
-    public List<Record> executeQuery(String query, Map<String, Object> params) {
-        // Le try-with-resources est toujours une bonne pratique
-        try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(user, password));
-             var session = driver.session()) {
 
-            System.out.println("Executing Cypher Query: " + query);
-
-            // On exécute la requête
-            Result result = session.run(query, params);
-
-            // CHANGEMENT : On consomme le résultat et on le retourne comme une List.
-            // La connexion sera fermée après, mais nous avons déjà nos données.
-            return result.list();
+    public List<Record> executeQuery(String cypher, Map<String,Object> params) {
+        try (var session = driver.session(SessionConfig.forDatabase("neo4j"))) {
+            return session.executeRead(tx -> runReadQuery(tx, cypher, params));
         }
     }
+    @Override
+    public void close() {
+        if (driver != null) driver.close();
+    }
+
 
     // ... buildVizHtmlFile reste inchangée ...
     public void buildVizHtmlFile(String query) {
