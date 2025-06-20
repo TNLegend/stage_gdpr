@@ -3,9 +3,8 @@ package Solver;
 import GraphDB.Neo4jInterface;
 import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
+import org.neo4j.driver.*;
 import org.neo4j.driver.Record;
-import org.neo4j.driver.Value;
-import org.neo4j.driver.Values;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
@@ -13,7 +12,8 @@ import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-
+import org.neo4j.driver.TransactionContext;
+import org.neo4j.driver.TransactionCallback;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -31,22 +31,50 @@ class SolverCypherTest {
     private SolverCypher   solver;
     private Path           timeFile;
 
-    /* ---------------------------------------------------- */
-    /* ----------------  préparation commune -------------- */
-    /* ---------------------------------------------------- */
     @BeforeEach
     void setUp() throws IOException {
         neo    = mock(Neo4jInterface.class);
+
+        // ───────────────────────────────────────────────────────────────
+        // M U S T - H A V E   S T U B S   F O R   getDriver() / session
+        // ───────────────────────────────────────────────────────────────
+        Driver   mockDriver  = mock(Driver.class);
+        Session  mockSession = mock(Session.class);
+        when(neo.getDriver()).thenReturn(mockDriver);
+        when(mockDriver.session(any(SessionConfig.class))).thenReturn(mockSession);
+
+        // Whenever someone does session.executeRead(tx -> neo.runReadQuery(tx, …)),
+        // we capture that lambda, hand it a fake TransactionContext, and
+        // tell neo.runReadQuery(...) to delegate to the existing neo.executeQuery(...)
+        when(mockSession.executeRead(any(TransactionCallback.class)))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    TransactionCallback<List<Record>> callback = invocation.getArgument(0);
+                    // In 5.x the callback gets a Transaction (which extends TransactionContext)
+                    TransactionContext fakeTx = mock(TransactionContext.class);
+                    // Make neo.runReadQuery(fakeTx,…) delegate to neo.executeQuery(…)
+                    when(neo.runReadQuery(eq(fakeTx), anyString(), anyMap()))
+                            .thenAnswer(inner -> {
+                                String cypher = inner.getArgument(1);
+                                @SuppressWarnings("unchecked")
+                                Map<String,Object> params = inner.getArgument(2);
+                                return neo.executeQuery(cypher, params);
+                            });
+                    // execute the callback
+                    return callback.execute(fakeTx);
+                });
+        // ───────────────────────────────────────────────────────────────
+
         solver = new SolverCypher(neo);
 
-        // fichier temporaire de paramètres temporels
+        // … the rest of your existing setUp …
         timeFile = Files.createTempFile("times", ".pl");
         Files.writeString(timeFile, """
-                tCurrent(5000).
-                tLimit('access', 1000).
-                tLimit('erase',  1000).
-                tLimit('storage',1000).
-                """);
+            tCurrent(5000).
+            tLimit('access', 1000).
+            tLimit('erase',  1000).
+            tLimit('storage',1000).
+            """);
     }
 
     /* ---------------------------------------------------- */
