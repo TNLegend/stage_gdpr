@@ -34,24 +34,54 @@ public class Neo4jInterface implements AutoCloseable {
         this.password = password;
         if (driver != null) driver.close();               // reconfigure ?
         driver = GraphDatabase.driver(uri, AuthTokens.basic(user, password));
-        ensureIndexes();
+        ensureIndexesAndDebug();
     }
 
-    private void ensureIndexes() {
-        try ( var session = driver.session(SessionConfig.forDatabase("neo4j")) ) {
-            session.writeTransaction(tx -> {
-                // Notice: name BEFORE IF NOT EXISTS
-                tx.run("CREATE INDEX idx_proc_action    IF NOT EXISTS FOR (p:Process)  ON (p.action)");
-                tx.run("CREATE INDEX idx_art_type       IF NOT EXISTS FOR (a:Artifact) ON (a.type)");
-                tx.run("CREATE INDEX idx_art_cons_type  IF NOT EXISTS FOR (a:Artifact) ON (a.consent_type)");
-                tx.run("CREATE INDEX idx_wgb_TG         IF NOT EXISTS FOR ()-[r:wasGeneratedBy]-() ON (r.TG)");
-                tx.run("CREATE INDEX idx_used_TU        IF NOT EXISTS FOR ()-[r:used]-()           ON (r.TU)");
-                // optional: block until online
-                tx.run("CALL db.awaitIndexes()");
-                return null;
-            });
+    private void ensureIndexesAndDebug() {
+        List<String> indexQueries = List.of(
+                "CREATE INDEX idx_proc_action IF NOT EXISTS FOR (p:Process) ON (p.action)",
+                "CREATE INDEX idx_art_type IF NOT EXISTS FOR (a:Artifact) ON (a.type)",
+                "CREATE INDEX idx_art_cons_type IF NOT EXISTS FOR (a:Artifact) ON (a.consent_type)",
+                "CREATE INDEX idx_wgb_TG IF NOT EXISTS FOR ()-[r:wasGeneratedBy]-() ON (r.TG)",
+                "CREATE INDEX idx_used_TU IF NOT EXISTS FOR ()-[r:used]-() ON (r.TU)"
+        );
+
+        System.out.println("--- Starting Index Creation and Debug ---");
+
+        try (var session = driver.session(SessionConfig.forDatabase("neo4j"))) {
+
+            long nodeCount = session.run("MATCH (n) RETURN count(n) AS count").single().get("count").asLong();
+            if (nodeCount > 0) {
+                System.out.println("[WARNING] Attempting to create indexes on a non-empty database with " + nodeCount + " nodes. This may be slow.");
+            } else {
+                System.out.println("[INFO] Database is empty. Index creation should be fast.");
+            }
+
+            for (String query : indexQueries) {
+                System.out.println("Executing: " + query);
+                long startTime = System.nanoTime();
+
+                session.writeTransaction(tx -> {
+                    tx.run(query);
+                    return null;
+                });
+
+                long durationMs = (System.nanoTime() - startTime) / 1_000_000;
+                System.out.println(" -> Creation command sent in " + durationMs + " ms. Now waiting for it to be online...");
+
+                startTime = System.nanoTime();
+                // ▼▼▼ CORRECTION APPLIQUÉE ICI ▼▼▼
+                session.run("CALL db.awaitIndexes(60000)").consume(); // 60000ms = 60s
+                durationMs = (System.nanoTime() - startTime) / 1_000_000;
+                System.out.println(" -> Index is online. Awaiting took " + durationMs + " ms.");
+            }
+            System.out.println("--- Indexing process finished. ---");
+        } catch (Exception e) {
+            System.err.println("[ERROR] Failed during index creation: " + e.getMessage());
+            throw new RuntimeException("Index creation failed", e);
         }
     }
+
 
     public void retrievePrologPG(){
         try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(user, password))) {
