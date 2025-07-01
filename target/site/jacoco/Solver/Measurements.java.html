@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="fr"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Measurements.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ter</a> &gt; <a href="index.source.html" class="el_package">Solver</a> &gt; <span class="el_source">Measurements.java</span></div><h1>Measurements.java</h1><pre class="source lang-java linenums">package Solver;
+
+import GraphDB.Neo4jInterface;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.StringUtils;
+
+import java.io.*;
+import java.util.*;
+
+<span class="nc" id="L10">public class Measurements {</span>
+
+    // Configuration constants
+    private static final String RESULTS_FILE_NAME = &quot;results.csv&quot;;
+    private static final String TIME_FILE_PATH = &quot;src/main/java/Solver/testfiles/time_sn_noncompliant.pl&quot;;
+    private static final String GRAPH_FOLDER = &quot;src/main/java/Solver/testfiles/&quot;; // Retained your path
+
+    // Original Prolog queries - used for PrologSolver
+<span class="nc" id="L18">    private static final List&lt;String&gt; PROLOG_QUERIES_TO_TEST = List.of(</span>
+            &quot;legal(P, D, PU, T, DP, C).&quot;,
+            &quot;eraseCompliant(D, T, P).&quot;,
+            &quot;rightAccess(S, TE).&quot;,
+            &quot;storageLimitation(D, TU).&quot;
+    );
+
+    // Principle names - used for CypherSolver (as seen in ScreenController's usage)
+    // Assuming Issue.IssueType.typeName resolves to these strings.
+<span class="nc" id="L27">    private static final List&lt;String&gt; CYPHER_PRINCIPLE_NAMES_TO_TEST = List.of(</span>
+            &quot;LEGAL&quot;,
+            &quot;RIGHT_TO_ERASURE&quot;,
+            &quot;RIGHT_TO_ACCESS&quot;,
+            &quot;STORAGE_LIMITATION&quot;
+    );
+
+    private static final int NUMBER_OF_RUNS = 10;
+    // Set to true for detailed Prolog trace and debugging, false for performance measurements
+    private static final boolean PROLOG_TRACING_ENABLED_FOR_DEBUG = false;
+
+    // List of files to skip from standard parameter parsing, e.g., utility Prolog files
+<span class="nc" id="L39">    private static final List&lt;String&gt; FILES_TO_SKIP_PARAM_PARSING = List.of(</span>
+            &quot;causal_dependencies.pl&quot;,
+            &quot;time_sn_noncompliant.pl&quot;, // If this is ever placed in RGPD folder
+            &quot;erase_compliant.pl&quot;,
+            &quot;right_access.pl&quot;,
+            &quot;storage_limitation.pl&quot;,
+            &quot;legal.pl&quot;,
+            &quot;time_default.pl&quot;
+    );
+
+    public static void main(String[] args) throws IOException {
+<span class="nc" id="L50">        File results = new File(RESULTS_FILE_NAME);</span>
+        // Using try-with-resources for automatic closing of BufferedWriter
+<span class="nc" id="L52">        try (BufferedWriter bw = new BufferedWriter(new FileWriter(results))) {</span>
+<span class="nc" id="L53">            bw.write(&quot;FILE_NAME,TYPE,NB_USERS,SIZE_KO,SOLVER,SOLVING_TIME_MS\n&quot;);</span>
+<span class="nc" id="L54">            bw.flush();</span>
+
+<span class="nc" id="L56">            File graphDirectory = new File(GRAPH_FOLDER);</span>
+<span class="nc bnc" id="L57" title="All 4 branches missed.">            if (!graphDirectory.exists() || !graphDirectory.isDirectory()) {</span>
+<span class="nc" id="L58">                System.err.println(&quot;❌ Erreur : Le dossier de graphes '&quot; + GRAPH_FOLDER + &quot;' n'existe pas ou n'est pas un répertoire.&quot;);</span>
+<span class="nc" id="L59">                return;</span>
+            }
+
+<span class="nc" id="L62">            File[] filesList = graphDirectory.listFiles();</span>
+<span class="nc bnc" id="L63" title="All 4 branches missed.">            if (filesList == null || filesList.length == 0) {</span>
+<span class="nc" id="L64">                System.out.println(&quot;No .pl files found in &quot; + GRAPH_FOLDER);</span>
+<span class="nc" id="L65">                return;</span>
+            }
+
+<span class="nc" id="L68">            Arrays.sort(filesList, Comparator.comparing(File::getName));</span>
+
+            // Initialize Neo4jInterface once outside the file loop for efficiency
+            // and configure it with your credentials.
+            // **IMPORTANT**: Replace &quot;bolt://localhost:7687&quot;, &quot;neo4j&quot;, &quot;rootroot&quot; with your actual Neo4j connection details.
+<span class="nc" id="L73">            Neo4jInterface globalNeo4jInterface = new Neo4jInterface();</span>
+<span class="nc" id="L74">            globalNeo4jInterface.setParameters(&quot;bolt://localhost:7687&quot;, &quot;neo4j&quot;, &quot;01012002&quot;);</span>
+
+<span class="nc bnc" id="L76" title="All 2 branches missed.">            for (File fileEntry : filesList) {</span>
+                // Skip directories and files not ending with .pl
+<span class="nc bnc" id="L78" title="All 4 branches missed.">                if (!fileEntry.isFile() || !fileEntry.getName().endsWith(&quot;.pl&quot;)) {</span>
+<span class="nc" id="L79">                    continue;</span>
+                }
+
+<span class="nc" id="L82">                String name = fileEntry.getName();</span>
+
+                // Skip &quot;copy&quot; files that might be duplicates
+<span class="nc bnc" id="L85" title="All 2 branches missed.">                if (name.contains(&quot;-copy&quot;)) {</span>
+<span class="nc" id="L86">                    System.out.println(&quot;⏭️ Ignoré : Fichier de copie détecté : &quot; + name + &quot;. Veuillez supprimer les fichiers '-copy' pour éviter les avertissements Prolog de redéfinition.&quot;);</span>
+<span class="nc" id="L87">                    continue;</span>
+                }
+
+                // Un-commented this 'continue' as discussed previously, it's essential
+                // if these are not actual graph files for measurement.
+<span class="nc bnc" id="L92" title="All 2 branches missed.">                if (FILES_TO_SKIP_PARAM_PARSING.contains(name)) {</span>
+<span class="nc" id="L93">                    System.out.println(&quot;⏭️ Ignoré : Fichier utilitaire détecté (non un graphe de test) : &quot; + name);</span>
+<span class="nc" id="L94">                    continue;</span>
+                }
+
+                try {
+<span class="nc" id="L98">                    String baseName = StringUtils.substringBefore(name, &quot;.&quot;);</span>
+<span class="nc" id="L99">                    String[] params = baseName.split(&quot;_&quot;);</span>
+
+<span class="nc" id="L101">                    String nbUsers = &quot;unknown&quot;; // Default value for NB_USERS</span>
+<span class="nc" id="L102">                    String type = &quot;unknown&quot;;    // Default value for TYPE</span>
+
+                    // --- Improved Parsing Logic for NB_USERS ---
+<span class="nc bnc" id="L105" title="All 2 branches missed.">                    if (params.length &gt; 0) {</span>
+<span class="nc" id="L106">                        String firstSegment = params[0];</span>
+                        // Check if the first segment contains a number (e.g., &quot;2users&quot;, &quot;500&quot;, &quot;webservergraph3&quot;)
+<span class="nc bnc" id="L108" title="All 2 branches missed.">                        if (firstSegment.matches(&quot;.*\\d+.*&quot;)) {</span>
+                            // Extract only digits. Handles &quot;2users&quot; -&gt; &quot;2&quot;, &quot;WebServerGraph3&quot; -&gt; &quot;3&quot;
+<span class="nc" id="L110">                            nbUsers = firstSegment.replaceAll(&quot;[^\\d]&quot;, &quot;&quot;);</span>
+                        } else {
+                            // Use the segment itself as a descriptive label (e.g., &quot;SocialNetwork&quot;, &quot;empty&quot;, &quot;generated&quot;, &quot;twoUsers&quot;)
+<span class="nc" id="L113">                            nbUsers = firstSegment;</span>
+                        }
+                    }
+
+                    // --- Improved Parsing Logic for TYPE ---
+                    // Prioritize specific whole file names or significant parts
+<span class="nc bnc" id="L119" title="All 2 branches missed.">                    if (baseName.equalsIgnoreCase(&quot;empty_prov_graph&quot;)) {</span>
+<span class="nc" id="L120">                        type = &quot;provenance&quot;; // More specific than just &quot;graph&quot;</span>
+<span class="nc" id="L121">                        nbUsers = &quot;empty&quot;; // Override nbUsers for this specific file, if 'empty' is a user type</span>
+<span class="nc bnc" id="L122" title="All 2 branches missed.">                    } else if (baseName.equalsIgnoreCase(&quot;generated_graph&quot;)) {</span>
+<span class="nc" id="L123">                        type = &quot;generated&quot;;</span>
+<span class="nc" id="L124">                        nbUsers = &quot;generated&quot;; // Override nbUsers</span>
+<span class="nc bnc" id="L125" title="All 2 branches missed.">                    } else if (baseName.equalsIgnoreCase(&quot;time_default&quot;)) {</span>
+<span class="nc" id="L126">                        type = &quot;time_data&quot;;</span>
+<span class="nc" id="L127">                        nbUsers = &quot;default&quot;; // Override nbUsers</span>
+<span class="nc bnc" id="L128" title="All 2 branches missed.">                    } else if (baseName.toLowerCase().startsWith(&quot;webservergraph&quot;)) { // Catches WebServerGraph3.pl</span>
+<span class="nc" id="L129">                        type = &quot;webserver&quot;;</span>
+<span class="nc bnc" id="L130" title="All 2 branches missed.">                    } else if (baseName.toLowerCase().startsWith(&quot;socialnetwork&quot;)) { // Catches SocialNetwork_compliant.pl</span>
+<span class="nc" id="L131">                        type = &quot;socialnetwork&quot;;</span>
+<span class="nc bnc" id="L132" title="All 2 branches missed.">                    } else if (baseName.toLowerCase().startsWith(&quot;testload&quot;)) { // Catches testLoadPrologFile_subsetC.pl</span>
+<span class="nc" id="L133">                        type = &quot;testload&quot;;</span>
+<span class="nc bnc" id="L134" title="All 2 branches missed.">                    } else if (baseName.toLowerCase().startsWith(&quot;webstore&quot;)) { // Catches webstore_compliant.pl</span>
+<span class="nc" id="L135">                        type = &quot;webstore&quot;;</span>
+<span class="nc bnc" id="L136" title="All 2 branches missed.">                    } else if (baseName.toLowerCase().startsWith(&quot;twousers&quot;)) { // Catches twoUsers_compliant.pl</span>
+<span class="nc" id="L137">                        type = &quot;users_test&quot;; // Can be more specific if desired, e.g., &quot;simple_users&quot;</span>
+                    }
+                    // Then, check for common suffixes
+<span class="nc bnc" id="L140" title="All 4 branches missed.">                    else if (params.length &gt; 0 &amp;&amp; params[params.length - 1].equalsIgnoreCase(&quot;compliant&quot;)) {</span>
+<span class="nc" id="L141">                        type = &quot;compliant&quot;;</span>
+<span class="nc bnc" id="L142" title="All 4 branches missed.">                    } else if (params.length &gt; 0 &amp;&amp; params[params.length - 1].equalsIgnoreCase(&quot;noncompliant&quot;)) {</span>
+<span class="nc" id="L143">                        type = &quot;noncompliant&quot;;</span>
+                    }
+                    // General fallbacks if no specific pattern matched above
+<span class="nc bnc" id="L146" title="All 2 branches missed.">                    else if (baseName.toLowerCase().contains(&quot;graph&quot;)) {</span>
+<span class="nc" id="L147">                        type = &quot;graph&quot;; // Generic graph if no other specific type</span>
+<span class="nc bnc" id="L148" title="All 2 branches missed.">                    } else if (baseName.toLowerCase().contains(&quot;time&quot;)) {</span>
+<span class="nc" id="L149">                        type = &quot;time_data&quot;; // Generic time data if no specific type</span>
+                    }
+                    // Final fallback to original logic for type (if it still helps for some naming conventions)
+<span class="nc bnc" id="L152" title="All 4 branches missed.">                    if (type.equals(&quot;unknown&quot;) &amp;&amp; params.length &gt;= 3) {</span>
+<span class="nc" id="L153">                        type = params[2];</span>
+                    }
+                    // if still unknown, it remains &quot;unknown&quot;
+
+
+<span class="nc" id="L158">                    long sizeKo = FileUtils.sizeOf(fileEntry) / 1000;</span>
+
+<span class="nc" id="L160">                    System.out.println(&quot;\n📂 Traitement du fichier : &quot; + name + &quot; | Type : &quot; + type + &quot; | Nb Users : &quot; + nbUsers + &quot; | Taille : &quot; + sizeKo + &quot; Ko&quot;);</span>
+
+                    // --- IMPORTANT: Load the graph into Neo4j once per file for Cypher solver ---
+<span class="nc" id="L163">                    System.out.println(&quot;  🌐 Chargement du graphe dans Neo4j pour le solveur Cypher...&quot;);</span>
+<span class="nc" id="L164">                    globalNeo4jInterface.retrieveGraphDB(fileEntry.getAbsolutePath());</span>
+<span class="nc" id="L165">                    System.out.println(&quot;  ✅ Graphe chargé dans Neo4j.&quot;);</span>
+
+
+<span class="nc bnc" id="L168" title="All 2 branches missed.">                    for (String solverType : List.of(&quot;Prolog&quot;, &quot;Cypher&quot;)) {</span>
+<span class="nc" id="L169">                        System.out.print(&quot; → Solveur &quot; + solverType + &quot; : &quot;);</span>
+<span class="nc" id="L170">                        long totalTimeMs = 0; // Sum of times for all runs</span>
+<span class="nc" id="L171">                        boolean hasFailed = false;</span>
+
+                        // Determine which queries list to use based on solver type
+                        List&lt;String&gt; currentQueriesToTest;
+<span class="nc bnc" id="L175" title="All 2 branches missed.">                        if (solverType.equals(&quot;Prolog&quot;)) {</span>
+<span class="nc" id="L176">                            currentQueriesToTest = PROLOG_QUERIES_TO_TEST;</span>
+                        } else { // Cypher
+<span class="nc" id="L178">                            currentQueriesToTest = CYPHER_PRINCIPLE_NAMES_TO_TEST;</span>
+                        }
+
+                        // Warm-up run for JVM and potentially solver specific caches (optional but good practice)
+                        if (NUMBER_OF_RUNS &gt; 1) {
+<span class="nc" id="L183">                            System.out.print(&quot;(Warm-up...) &quot;);</span>
+                            SolverInterface warmUpSolver;
+<span class="nc bnc" id="L185" title="All 2 branches missed.">                            if (solverType.equals(&quot;Prolog&quot;)) {</span>
+<span class="nc" id="L186">                                warmUpSolver = new PrologSolver(); // Retained your original constructor call</span>
+                            } else {
+<span class="nc" id="L188">                                warmUpSolver = new SolverCypher(globalNeo4jInterface);</span>
+                            }
+                            try {
+<span class="nc" id="L191">                                warmUpSolver.solve(currentQueriesToTest, fileEntry.getPath(), TIME_FILE_PATH);</span>
+<span class="nc" id="L192">                            } catch (Exception e) {</span>
+<span class="nc" id="L193">                                System.err.println(&quot;\n  ⚠️ Erreur pendant le warm-up avec &quot; + solverType + &quot; : &quot; + e.getMessage());</span>
+                            } finally {
+<span class="nc bnc" id="L195" title="All 2 branches missed.">                                if (warmUpSolver instanceof PrologSolver) {</span>
+<span class="nc" id="L196">                                    ((PrologSolver) warmUpSolver).resetSolver();</span>
+                                }
+                            }
+                        }
+
+<span class="nc bnc" id="L201" title="All 2 branches missed.">                        for (int i = 0; i &lt; NUMBER_OF_RUNS; i++) {</span>
+                            SolverInterface solver;
+<span class="nc bnc" id="L203" title="All 2 branches missed.">                            if (solverType.equals(&quot;Prolog&quot;)) {</span>
+<span class="nc" id="L204">                                solver = new PrologSolver(); // Retained your original constructor call</span>
+                            } else {
+<span class="nc" id="L206">                                solver = new SolverCypher(globalNeo4jInterface);</span>
+                            }
+
+<span class="nc" id="L209">                            long start = System.nanoTime();</span>
+                            try {
+<span class="nc" id="L211">                                solver.solve(currentQueriesToTest, fileEntry.getPath(), TIME_FILE_PATH);</span>
+<span class="nc" id="L212">                            } catch (Exception e) {</span>
+<span class="nc" id="L213">                                System.err.println(&quot;\n  ⚠️ Erreur pendant exécution avec &quot; + solverType + &quot; (Run &quot; + (i + 1) + &quot;) : &quot; + e.getMessage());</span>
+<span class="nc" id="L214">                                hasFailed = true;</span>
+<span class="nc" id="L215">                                totalTimeMs = -1; // Indicate failure</span>
+                                break; // Stop further runs for this solver/file if it fails
+                            } finally {
+<span class="nc bnc" id="L218" title="All 2 branches missed.">                                if (solver instanceof PrologSolver) {</span>
+<span class="nc" id="L219">                                    ((PrologSolver) solver).resetSolver();</span>
+                                }
+                            }
+<span class="nc" id="L222">                            long end = System.nanoTime();</span>
+<span class="nc" id="L223">                            totalTimeMs += (end - start) / 1_000_000; // Accumulate time in milliseconds</span>
+                        }
+
+<span class="nc" id="L226">                        long avgTime = -1;</span>
+<span class="nc bnc" id="L227" title="All 2 branches missed.">                        if (!hasFailed) {</span>
+<span class="nc" id="L228">                            avgTime = totalTimeMs / NUMBER_OF_RUNS;</span>
+<span class="nc" id="L229">                            System.out.println(&quot;✅ Terminé | Temps moyen : &quot; + avgTime + &quot; ms&quot;);</span>
+                        } else {
+<span class="nc" id="L231">                            System.out.println(&quot;❌ Échec&quot;);</span>
+                        }
+
+<span class="nc" id="L234">                        bw.write(String.format(Locale.US, &quot;%s,%s,%s,%d,%s,%d\n&quot;,</span>
+<span class="nc" id="L235">                                name, type, nbUsers, sizeKo, solverType, avgTime));</span>
+<span class="nc" id="L236">                        bw.flush();</span>
+<span class="nc" id="L237">                    }</span>
+
+<span class="nc" id="L239">                } catch (Exception ex) {</span>
+<span class="nc" id="L240">                    System.err.println(&quot;🚫 Erreur générale avec le fichier &quot; + fileEntry.getName() + &quot; : &quot; + ex.getMessage());</span>
+<span class="nc" id="L241">                    bw.write(String.format(Locale.US, &quot;%s,%s,%s,%d,%s,%d\n&quot;,</span>
+<span class="nc" id="L242">                            fileEntry.getName(), &quot;error&quot;, &quot;error&quot;, FileUtils.sizeOf(fileEntry) / 1000, &quot;N/A&quot;, -1));</span>
+<span class="nc" id="L243">                    bw.flush();</span>
+<span class="nc" id="L244">                }</span>
+            }
+<span class="nc" id="L246">            globalNeo4jInterface.close(); // Retained your original close method call</span>
+<span class="nc" id="L247">        }</span>
+<span class="nc" id="L248">        System.out.println(&quot;\n✅ Comparaison terminée ! Résultats dans &quot; + RESULTS_FILE_NAME);</span>
+<span class="nc" id="L249">    }</span>
+
+    private static String getSafe(String[] array, int index, String defaultValue) {
+<span class="nc bnc" id="L252" title="All 2 branches missed.">        return index &lt; array.length ? array[index] : defaultValue;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.12.202403310830</span></div></body></html>

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="fr"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Converter.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ter</a> &gt; <a href="index.source.html" class="el_package">Traducteur</a> &gt; <span class="el_source">Converter.java</span></div><h1>Converter.java</h1><pre class="source lang-java linenums">package Traducteur;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class Converter {
+    private List&lt;String&gt; principes;
+    private String cheminGraphe;
+    private List&lt;String&gt; datas;
+    private List&lt;String&gt; dataSubjects;
+    private List&lt;String&gt; processes;
+
+<span class="fc" id="L14">    public Converter( List&lt;String&gt; listPrincipes, String cheminGraphe, List&lt;String&gt; donnees, List&lt;String&gt; utilisateurs, List&lt;String&gt; processus){</span>
+<span class="fc" id="L15">        this.principes = listPrincipes;</span>
+<span class="fc" id="L16">        this.cheminGraphe = cheminGraphe;</span>
+<span class="pc bpc" id="L17" title="1 of 4 branches missed.">        if (processus != null &amp;&amp; !processus.isEmpty()){</span>
+<span class="fc" id="L18">            this.processes = processus;</span>
+        } else
+<span class="fc" id="L20">            this.processes = Collections.singletonList(&quot;P&quot;);</span>
+<span class="pc bpc" id="L21" title="1 of 4 branches missed.">        if (donnees != null &amp;&amp; !donnees.isEmpty()){</span>
+<span class="fc" id="L22">            this.datas = donnees;</span>
+        } else
+<span class="fc" id="L24">            this.datas = Collections.singletonList(&quot;D&quot;);</span>
+
+<span class="pc bpc" id="L26" title="3 of 4 branches missed.">        if (utilisateurs != null &amp;&amp; !utilisateurs.isEmpty()) {</span>
+<span class="nc" id="L27">            this.dataSubjects = utilisateurs;</span>
+        } else
+<span class="fc" id="L29">            this.dataSubjects = Collections.singletonList(&quot;S&quot;);</span>
+<span class="fc" id="L30">    }</span>
+
+    public List&lt;String&gt; ConvertToPrologQuery(){
+
+<span class="fc" id="L34">        List&lt;String&gt; listQueries = new ArrayList&lt;&gt;();</span>
+
+<span class="fc bfc" id="L36" title="All 2 branches covered.">        for (String principe : principes) {</span>
+
+<span class="fc bfc" id="L38" title="All 5 branches covered.">            switch (principe){</span>
+
+                case &quot;Lawfullness&quot; : {
+<span class="fc bfc" id="L41" title="All 2 branches covered.">                    for(String process : processes) {</span>
+<span class="fc bfc" id="L42" title="All 2 branches covered.">                        for(String data : datas) {</span>
+<span class="fc" id="L43">                            StringBuilder query = new StringBuilder();</span>
+
+<span class="fc" id="L45">                            query.append(&quot;legal(&quot; + process + &quot;, &quot; + data + &quot;, PU, T, DP, C).&quot;);</span>
+
+<span class="fc" id="L47">                            listQueries.add(query.toString());</span>
+<span class="fc" id="L48">                        }</span>
+<span class="fc" id="L49">                    }</span>
+
+<span class="fc" id="L51">                    break;</span>
+                }
+
+                case &quot;Right-to-erasure&quot; : {
+<span class="fc bfc" id="L55" title="All 2 branches covered.">                    for(String data : datas) {</span>
+<span class="fc" id="L56">                        StringBuilder query = new StringBuilder();</span>
+
+<span class="fc" id="L58">                        query.append(&quot;eraseCompliant(&quot; + data + &quot;, T, P).&quot;);</span>
+
+<span class="fc" id="L60">                        listQueries.add(query.toString());</span>
+<span class="fc" id="L61">                    }</span>
+
+<span class="fc" id="L63">                    break;</span>
+                }
+                case &quot;Storage-limitation&quot; : {
+<span class="fc bfc" id="L66" title="All 2 branches covered.">                    for(String data : datas) {</span>
+<span class="fc" id="L67">                        StringBuilder query = new StringBuilder();</span>
+
+<span class="fc" id="L69">                        query.append(&quot;storageLimitation(&quot; + data + &quot;, TU).&quot;);</span>
+<span class="fc" id="L70">                        listQueries.add(query.toString());</span>
+<span class="fc" id="L71">                    }</span>
+
+<span class="fc" id="L73">                    break;</span>
+                }
+                case &quot;Right-to-access&quot; : {
+<span class="fc bfc" id="L76" title="All 2 branches covered.">                    for(String dataSubject : dataSubjects) {</span>
+<span class="fc" id="L77">                        StringBuilder query = new StringBuilder();</span>
+
+<span class="fc" id="L79">                        query.append(&quot;rightAccess(&quot; + dataSubject + &quot;, TE).&quot;);</span>
+
+<span class="fc" id="L81">                        listQueries.add(query.toString());</span>
+<span class="fc" id="L82">                    }</span>
+
+                    break;
+                }
+//                default: listQueries.;
+
+            }
+<span class="fc" id="L89">        }</span>
+
+<span class="fc" id="L91">        return listQueries;</span>
+    }
+
+    public String getCheminGraphe(){
+<span class="nc" id="L95">        return cheminGraphe;</span>
+    }
+
+    /**
+     * Retourne la liste des noms des principes sélectionnés par l'utilisateur.
+     * @return Une liste de chaînes (ex: [&quot;Right-to-erasure&quot;, &quot;Lawfullness&quot;])
+     */
+    public List&lt;String&gt; getPrincipes() {
+<span class="nc" id="L103">        return this.principes;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.12.202403310830</span></div></body></html>

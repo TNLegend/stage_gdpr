@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="fr"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>GraphDBToProlog.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ter</a> &gt; <a href="index.source.html" class="el_package">GraphDB</a> &gt; <span class="el_source">GraphDBToProlog.java</span></div><h1>GraphDBToProlog.java</h1><pre class="source lang-java linenums">package GraphDB;
+
+import org.neo4j.driver.*;
+import org.neo4j.driver.Record;
+
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.HashMap;
+
+<span class="nc" id="L12">public class GraphDBToProlog {</span>
+
+    /**
+     * Retrieves the GraphDB provenance graph and writes a corresponding Prolog file (stored in Neo4jInterface.generatedPrologGraphPath)
+     * @param driver GraphDB driver
+     * @param path Path to the generated Prolog provenance graph file
+     */
+    public static void convert(Driver driver, String path) {
+
+        try {
+<span class="nc" id="L22">            File out = new File(path);</span>
+<span class="nc" id="L23">            FileWriter fw = new FileWriter(out);</span>
+<span class="nc" id="L24">            BufferedWriter bw = new BufferedWriter(fw);</span>
+
+            // 'wasControlledBy' predicates
+<span class="nc" id="L27">            var result = driver.executableQuery(&quot;MATCH (a:Agent)&lt;-[w:wasControlledBy]-(p:Process) RETURN a,w,p&quot;)</span>
+<span class="nc" id="L28">                    .withConfig(QueryConfig.builder().withDatabase(&quot;neo4j&quot;).build())</span>
+<span class="nc" id="L29">                    .execute();</span>
+
+<span class="nc bnc" id="L31" title="All 2 branches missed.">            for (Record r : result.records()) {</span>
+<span class="nc" id="L32">                Value a = r.get(&quot;a&quot;);</span>
+<span class="nc" id="L33">                Value p = r.get(&quot;p&quot;);</span>
+<span class="nc" id="L34">                Value w = r.get(&quot;w&quot;);</span>
+<span class="nc" id="L35">                bw.write((&quot;wasControlledBy(&quot; + p.get(&quot;name&quot;) + &quot;,&quot; + a.get(&quot;name&quot;) + &quot;,&quot; + w.get(&quot;ctx&quot;) + &quot;,&quot; + w.get(&quot;TB&quot;) + &quot;,&quot; + w.get(&quot;TE&quot;) + &quot;).\n&quot;).replace(&quot;\&quot;&quot;, &quot;'&quot;));</span>
+<span class="nc" id="L36">            }</span>
+
+            // 'wasGeneratedBy' predicates
+<span class="nc" id="L39">            result = driver.executableQuery(&quot;MATCH (p:Process)&lt;-[w:wasGeneratedBy]-(a:Artifact) RETURN p,w,a&quot;)</span>
+<span class="nc" id="L40">                    .withConfig(QueryConfig.builder().withDatabase(&quot;neo4j&quot;).build())</span>
+<span class="nc" id="L41">                    .execute();</span>
+
+<span class="nc bnc" id="L43" title="All 2 branches missed.">            for (Record r : result.records()) {</span>
+<span class="nc" id="L44">                Value a = r.get(&quot;a&quot;);</span>
+<span class="nc" id="L45">                Value p = r.get(&quot;p&quot;);</span>
+<span class="nc" id="L46">                Value w = r.get(&quot;w&quot;);</span>
+<span class="nc" id="L47">                bw.write((&quot;wasGeneratedBy(&quot; + a.get(&quot;name&quot;) + &quot;,&quot; + p.get(&quot;name&quot;) + &quot;,&quot; + w.get(&quot;ctx&quot;) + &quot;,&quot; + w.get(&quot;TG&quot;) + &quot;).\n&quot;).replace(&quot;\&quot;&quot;, &quot;'&quot;));</span>
+<span class="nc" id="L48">            }</span>
+
+            // 'wasTriggeredBy' predicates
+<span class="nc" id="L51">            result = driver.executableQuery(&quot;MATCH (p1:Process)&lt;-[w:wasTriggeredBy]-(p2:Process) RETURN p1,w,p2&quot;)</span>
+<span class="nc" id="L52">                    .withConfig(QueryConfig.builder().withDatabase(&quot;neo4j&quot;).build())</span>
+<span class="nc" id="L53">                    .execute();</span>
+
+<span class="nc bnc" id="L55" title="All 2 branches missed.">            for (Record r : result.records()) {</span>
+<span class="nc" id="L56">                Value p1 = r.get(&quot;p1&quot;);</span>
+<span class="nc" id="L57">                Value p2 = r.get(&quot;p2&quot;);</span>
+<span class="nc" id="L58">                Value w = r.get(&quot;w&quot;);</span>
+<span class="nc" id="L59">                bw.write((&quot;wasTriggeredBy(&quot; + p2.get(&quot;name&quot;) + &quot;,&quot; + p1.get(&quot;name&quot;) + &quot;,&quot; + w.get(&quot;ctx&quot;) + &quot;,&quot; + w.get(&quot;T&quot;) + &quot;).\n&quot;).replace(&quot;\&quot;&quot;, &quot;'&quot;));</span>
+<span class="nc" id="L60">            }</span>
+
+            // 'wasDerivedFrom' predicates
+<span class="nc" id="L63">            result = driver.executableQuery(&quot;MATCH (d1:Artifact)&lt;-[w:wasDerivedFrom]-(d2:Artifact) RETURN d1,w,d2&quot;)</span>
+<span class="nc" id="L64">                    .withConfig(QueryConfig.builder().withDatabase(&quot;neo4j&quot;).build())</span>
+<span class="nc" id="L65">                    .execute();</span>
+
+<span class="nc bnc" id="L67" title="All 2 branches missed.">            for (Record r : result.records()) {</span>
+<span class="nc" id="L68">                Value d1 = r.get(&quot;d1&quot;);</span>
+<span class="nc" id="L69">                Value d2 = r.get(&quot;d2&quot;);</span>
+<span class="nc" id="L70">                Value w = r.get(&quot;w&quot;);</span>
+<span class="nc" id="L71">                bw.write((&quot;wasDerivedFrom(&quot; + d2.get(&quot;name&quot;) + &quot;,&quot; + d1.get(&quot;name&quot;) + &quot;,&quot; + w.get(&quot;ctx&quot;) + &quot;,&quot; + w.get(&quot;T&quot;) + &quot;).\n&quot;).replace(&quot;\&quot;&quot;, &quot;'&quot;));</span>
+<span class="nc" id="L72">            }</span>
+
+            // 'used' predicates
+<span class="nc" id="L75">            result = driver.executableQuery(&quot;MATCH (a:Artifact)&lt;-[u:used]-(p:Process) RETURN a,u,p&quot;)</span>
+<span class="nc" id="L76">                    .withConfig(QueryConfig.builder().withDatabase(&quot;neo4j&quot;).build())</span>
+<span class="nc" id="L77">                    .execute();</span>
+
+<span class="nc bnc" id="L79" title="All 2 branches missed.">            for (Record r : result.records()) {</span>
+<span class="nc" id="L80">                Value a = r.get(&quot;a&quot;);</span>
+<span class="nc" id="L81">                Value p = r.get(&quot;p&quot;);</span>
+<span class="nc" id="L82">                Value u = r.get(&quot;u&quot;);</span>
+<span class="nc" id="L83">                bw.write((&quot;used(&quot; + p.get(&quot;name&quot;) + &quot;,&quot; + a.get(&quot;name&quot;) + &quot;,&quot; + u.get(&quot;ctx&quot;) + &quot;,&quot; + u.get(&quot;TU&quot;) + &quot;).\n&quot;).replace(&quot;\&quot;&quot;, &quot;'&quot;));</span>
+<span class="nc" id="L84">            }</span>
+
+            // 'action' predicates
+<span class="nc" id="L87">            result = driver.executableQuery(&quot;MATCH (p:Process) RETURN p&quot;)</span>
+<span class="nc" id="L88">                    .withConfig(QueryConfig.builder().withDatabase(&quot;neo4j&quot;).build())</span>
+<span class="nc" id="L89">                    .execute();</span>
+
+<span class="nc bnc" id="L91" title="All 2 branches missed.">            for (Record r : result.records()) {</span>
+<span class="nc" id="L92">                Value p = r.get(&quot;p&quot;);</span>
+<span class="nc" id="L93">                bw.write((&quot;action(&quot; + p.get(&quot;name&quot;) + &quot;,&quot; + p.get(&quot;action&quot;) + &quot;).\n&quot;).replace(&quot;\&quot;&quot;, &quot;'&quot;));</span>
+<span class="nc" id="L94">            }</span>
+
+            // 'purposes' predicates
+<span class="nc" id="L97">            result = driver.executableQuery(&quot;MATCH (:Process)&lt;-[:wasGeneratedBy {ctx:'consent'}]-(c:Artifact) RETURN c&quot;)</span>
+<span class="nc" id="L98">                    .withConfig(QueryConfig.builder().withDatabase(&quot;neo4j&quot;).build())</span>
+<span class="nc" id="L99">                    .execute();</span>
+
+<span class="nc bnc" id="L101" title="All 2 branches missed.">            for (Record r : result.records()) {</span>
+                StringBuilder line;
+<span class="nc" id="L103">                HashMap&lt;String, Object&gt; consentArtifact = new HashMap&lt;&gt;(r.get(&quot;c&quot;).asMap());</span>
+<span class="nc" id="L104">                String consent = consentArtifact.get(&quot;name&quot;).toString();</span>
+<span class="nc" id="L105">                consent = &quot;'&quot; + consent + &quot;'&quot;;</span>
+
+<span class="nc" id="L107">                consentArtifact.remove(&quot;name&quot;);</span>
+<span class="nc bnc" id="L108" title="All 2 branches missed.">                for (String data : consentArtifact.keySet()) {</span>
+<span class="nc" id="L109">                    line = new StringBuilder();</span>
+<span class="nc" id="L110">                    line.append(&quot;purposes(&quot;).append(consent).append(&quot;,&quot;);</span>
+<span class="nc bnc" id="L111" title="All 2 branches missed.">                    if (data.equals(&quot;_&quot;)) {</span>
+<span class="nc" id="L112">                        line.append(data).append(&quot;,&quot;);</span>
+                    } else {
+<span class="nc" id="L114">                        line.append(&quot;'&quot;).append(data).append(&quot;',&quot;);</span>
+                    }
+<span class="nc bnc" id="L116" title="All 2 branches missed.">                    if (consentArtifact.get(data).toString().equals(&quot;[]&quot;)){</span>
+<span class="nc" id="L117">                        line.append(&quot;[]&quot;);</span>
+                    } else {
+<span class="nc" id="L119">                        line.append(consentArtifact.get(data).toString().replace(&quot;[&quot;, &quot;['&quot;).replace(&quot;]&quot;, &quot;']&quot;).replace(&quot;,&quot;, &quot;','&quot;).replace(&quot; &quot;, &quot;&quot;));</span>
+                    }
+<span class="nc" id="L121">                    line.append(&quot;).\n&quot;);</span>
+<span class="nc" id="L122">                    bw.write(line.toString());</span>
+<span class="nc" id="L123">                }</span>
+<span class="nc" id="L124">            }</span>
+
+<span class="nc" id="L126">            result = driver.executableQuery(&quot;MATCH (c:Artifact {name:'mandatory_consent'}) RETURN c&quot;)</span>
+<span class="nc" id="L127">                    .withConfig(QueryConfig.builder().withDatabase(&quot;neo4j&quot;).build())</span>
+<span class="nc" id="L128">                    .execute();</span>
+
+            StringBuilder line;
+<span class="nc" id="L131">            HashMap&lt;String, Object&gt; consentArtifact = new HashMap&lt;&gt;(result.records().get(0).get(&quot;c&quot;).asMap());</span>
+<span class="nc" id="L132">            String consent = &quot;_&quot;;</span>
+
+<span class="nc" id="L134">            consentArtifact.remove(&quot;name&quot;);</span>
+<span class="nc bnc" id="L135" title="All 2 branches missed.">            for (String data : consentArtifact.keySet()) {</span>
+<span class="nc" id="L136">                line = new StringBuilder();</span>
+<span class="nc" id="L137">                line.append(&quot;purposes(&quot;).append(consent).append(&quot;,&quot;);</span>
+<span class="nc bnc" id="L138" title="All 2 branches missed.">                if (data.equals(&quot;_&quot;)) {</span>
+<span class="nc" id="L139">                    line.append(data).append(&quot;,&quot;);</span>
+                } else {
+<span class="nc" id="L141">                    line.append(&quot;'&quot;).append(data).append(&quot;',&quot;);</span>
+                }
+<span class="nc bnc" id="L143" title="All 2 branches missed.">                if (consentArtifact.get(data).toString().equals(&quot;[]&quot;)){</span>
+<span class="nc" id="L144">                    line.append(&quot;[]&quot;);</span>
+                } else {
+<span class="nc" id="L146">                    line.append(consentArtifact.get(data).toString().replace(&quot;[&quot;, &quot;['&quot;).replace(&quot;]&quot;, &quot;']&quot;).replace(&quot;,&quot;, &quot;','&quot;).replace(&quot; &quot;, &quot;&quot;));</span>
+                }
+<span class="nc" id="L148">                line.append(&quot;).\n&quot;);</span>
+<span class="nc" id="L149">                bw.write(line.toString());</span>
+<span class="nc" id="L150">            }</span>
+
+<span class="nc" id="L152">            bw.close();</span>
+<span class="nc" id="L153">            fw.close();</span>
+<span class="nc" id="L154">            driver.close();</span>
+
+<span class="nc" id="L156">        } catch (IOException e) {</span>
+<span class="nc" id="L157">            throw new RuntimeException(e);</span>
+<span class="nc" id="L158">        }</span>
+
+<span class="nc" id="L160">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.12.202403310830</span></div></body></html>

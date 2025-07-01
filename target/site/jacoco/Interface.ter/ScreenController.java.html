@@ -1,0 +1,555 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="fr"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ScreenController.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ter</a> &gt; <a href="index.source.html" class="el_package">Interface.ter</a> &gt; <span class="el_source">ScreenController.java</span></div><h1>ScreenController.java</h1><pre class="source lang-java linenums">package Interface.ter;
+
+import GraphDB.Neo4jInterface;
+import Solver.*; // CHANGEMENT : Importer toutes nos nouvelles classes (SolverInterface, PrologSolver, etc.)
+import Traducteur.Converter;
+import Traducteur.Parser;
+import com.sun.javafx.collections.ObservableListWrapper; // Note: cet import est déprécié, préférez FXCollections.observableArrayList
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.geometry.Insets;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.control.cell.ComboBoxListCell;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Pane;
+import javafx.scene.layout.VBox;
+import javafx.scene.text.Text;
+import javafx.stage.FileChooser;
+import javafx.stage.Stage;
+import javafx.scene.web.WebView;
+import javafx.scene.web.WebEngine;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.*;
+
+import javafx.concurrent.Worker;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
+
+<span class="nc" id="L31">public class ScreenController {</span>
+    // --- CHAMPS DE LA CLASSE (INCHANGÉS) ---
+<span class="nc" id="L33">    private HashMap&lt;String, Pane&gt; screenMap = new HashMap&lt;&gt;();</span>
+    private File graph;
+    private File timeFile;
+    private Scene main;
+<span class="nc" id="L37">    private SolveController solveController = new SolveController();</span>
+<span class="nc" id="L38">    private FileChooser fileChooser = new FileChooser();</span>
+<span class="nc" id="L39">    private Stage fileChooserStage = new Stage();</span>
+<span class="nc" id="L40">    private Neo4jInterface neo = null;</span>
+    private String nextScreen;
+    private String previousScreen;
+
+    // --- MÉTHODES D'INITIALISATION ET DE NAVIGATION (INCHANGÉES) ---
+    public void init() {
+<span class="nc" id="L46">        initGraphPathScreen();</span>
+<span class="nc" id="L47">        initTimesHelpScreen();</span>
+<span class="nc" id="L48">    }</span>
+
+    public void setMainScene(Scene scene) {
+<span class="nc" id="L51">        this.main = scene;</span>
+<span class="nc" id="L52">    }</span>
+
+    public void initGraphPathScreen() {
+<span class="nc" id="L55">        graph = null;</span>
+<span class="nc" id="L56">        timeFile = null;</span>
+<span class="nc" id="L57">        neo = null;</span>
+<span class="nc" id="L58">        VBox graphPathScreen = new VBox(10);</span>
+<span class="nc" id="L59">        graphPathScreen.setPadding(new Insets(20, 20, 20, 20));</span>
+<span class="nc" id="L60">        Label fileLabel = new Label(&quot;Provide the Prolog provenance graph file path:&quot;);</span>
+<span class="nc" id="L61">        TextField filePathField = new TextField();</span>
+<span class="nc" id="L62">        filePathField.setPromptText(&quot;Provenance graph file path&quot;);</span>
+<span class="nc" id="L63">        Button openGraphFile = new Button(&quot;Open...&quot;);</span>
+<span class="nc" id="L64">        openGraphFile.setOnAction(event -&gt; {</span>
+<span class="nc" id="L65">            fileChooser.setTitle(&quot;Select the graph provenance file&quot;);</span>
+<span class="nc" id="L66">            File selectedFile = fileChooser.showOpenDialog(fileChooserStage);</span>
+<span class="nc bnc" id="L67" title="All 2 branches missed.">            if (selectedFile != null) {</span>
+<span class="nc" id="L68">                filePathField.setText(selectedFile.getAbsolutePath());</span>
+            }
+<span class="nc" id="L70">        });</span>
+<span class="nc" id="L71">        Button submitGraphPath = new Button(&quot;Submit&quot;);</span>
+<span class="nc" id="L72">        submitGraphPath.setStyle(&quot;-fx-background-color: #13A0EB; -fx-text-fill: white;&quot;);</span>
+<span class="nc" id="L73">        submitGraphPath.setOnAction(event -&gt; {</span>
+<span class="nc" id="L74">            String path = filePathField.getText();</span>
+<span class="nc" id="L75">            File graphFile = new File(path);</span>
+<span class="nc bnc" id="L76" title="All 2 branches missed.">            if (graphFile.isFile()) {</span>
+<span class="nc" id="L77">                this.graph = graphFile;</span>
+                try {
+<span class="nc" id="L79">                    initChoiceScreen();</span>
+<span class="nc" id="L80">                } catch (IOException e) {</span>
+<span class="nc" id="L81">                    filePathField.clear();</span>
+<span class="nc" id="L82">                    graphPathScreen.getChildren().add(new Text(&quot;File opening error: &quot; + e.getMessage()));</span>
+<span class="nc" id="L83">                }</span>
+<span class="nc" id="L84">                activate(&quot;choiceScreen&quot;);</span>
+            } else {
+<span class="nc" id="L86">                graphPathScreen.getChildren().removeIf(s -&gt; s instanceof Text);</span>
+<span class="nc" id="L87">                filePathField.clear();</span>
+<span class="nc" id="L88">                graphPathScreen.getChildren().add(new Text(&quot;File not found&quot;));</span>
+            }
+<span class="nc" id="L90">        });</span>
+<span class="nc" id="L91">        Button neoImport = new Button(&quot;Import from Neo4J&quot;);</span>
+<span class="nc" id="L92">        neoImport.setOnAction(event -&gt; {</span>
+<span class="nc" id="L93">            nextScreen = &quot;choiceScreen&quot;;</span>
+<span class="nc" id="L94">            previousScreen = &quot;graphPathScreen&quot;;</span>
+<span class="nc" id="L95">            initNeo4jLogInScreen();</span>
+<span class="nc" id="L96">            activate(&quot;neo4jLogInScreen&quot;);</span>
+<span class="nc" id="L97">        });</span>
+<span class="nc" id="L98">        graphPathScreen.getChildren().addAll(fileLabel, filePathField, openGraphFile, submitGraphPath, neoImport);</span>
+<span class="nc" id="L99">        screenMap.put(&quot;graphPathScreen&quot;, graphPathScreen);</span>
+<span class="nc" id="L100">    }</span>
+
+    /**
+     * MODIFIÉ : Refactorisation complète pour intégrer le choix du solveur et clarifier la logique.
+     */
+    public void initChoiceScreen() throws IOException {
+<span class="nc" id="L106">        VBox choiceVBox = new VBox(10);</span>
+<span class="nc" id="L107">        choiceVBox.setPadding(new Insets(10));</span>
+
+        // --- SECTION FICHIER DE TEMPS ---
+<span class="nc" id="L110">        Label timeFileLabel = new Label(&quot;Provide time data file path:&quot;);</span>
+<span class="nc bnc" id="L111" title="All 2 branches missed.">        TextField timeFilePathField = new TextField(timeFile != null ? timeFile.getPath() : &quot;&quot;);</span>
+<span class="nc" id="L112">        timeFilePathField.setPromptText(&quot;Time data file path&quot;);</span>
+<span class="nc" id="L113">        Button openTimeFile = new Button(&quot;Open...&quot;);</span>
+<span class="nc" id="L114">        openTimeFile.setOnAction(event -&gt; {</span>
+<span class="nc" id="L115">            fileChooser.setTitle(&quot;Select time data file&quot;);</span>
+<span class="nc" id="L116">            File selectedFile = fileChooser.showOpenDialog(fileChooserStage);</span>
+<span class="nc bnc" id="L117" title="All 2 branches missed.">            if (selectedFile != null) {</span>
+<span class="nc" id="L118">                timeFilePathField.setText(selectedFile.getAbsolutePath());</span>
+            }
+<span class="nc" id="L120">        });</span>
+<span class="nc" id="L121">        Button redirectToHelp = new Button(&quot;Help&quot;);</span>
+<span class="nc" id="L122">        redirectToHelp.setOnAction(e -&gt; activate(&quot;timesHelpScreen&quot;));</span>
+<span class="nc" id="L123">        choiceVBox.getChildren().addAll(timeFileLabel, timeFilePathField, openTimeFile, redirectToHelp);</span>
+
+        // --- SECTION CHOIX DES PRINCIPES ---
+<span class="nc" id="L126">        Label principlesLabel = new Label(&quot;Select the principles to check:&quot;);</span>
+<span class="nc" id="L127">        CheckBox principle1 = new CheckBox(&quot;Lawfulness of processing (consent compliance)&quot;);</span>
+<span class="nc" id="L128">        CheckBox principle2 = new CheckBox(&quot;Right to erase&quot;);</span>
+<span class="nc" id="L129">        CheckBox principle3 = new CheckBox(&quot;Right to access&quot;);</span>
+<span class="nc" id="L130">        CheckBox principle4 = new CheckBox(&quot;Storage limitation&quot;);</span>
+<span class="nc" id="L131">        choiceVBox.getChildren().addAll(new Separator(), principlesLabel, principle1, principle2, principle3, principle4);</span>
+
+        // --- AJOUT : CHOIX DU SOLVEUR ---
+<span class="nc" id="L134">        Label solverLabel = new Label(&quot;Choose the solver engine:&quot;);</span>
+<span class="nc" id="L135">        ComboBox&lt;String&gt; solverChoiceBox = new ComboBox&lt;&gt;();</span>
+<span class="nc" id="L136">        solverChoiceBox.getItems().addAll(&quot;Prolog Solver&quot;, &quot;Cypher Solver&quot;);</span>
+<span class="nc" id="L137">        solverChoiceBox.setValue(&quot;Prolog Solver&quot;);</span>
+<span class="nc" id="L138">        choiceVBox.getChildren().addAll(new Separator(), solverLabel, solverChoiceBox);</span>
+        // On ajoute un &quot;écouteur&quot; qui réagit au changement de sélection
+<span class="nc" id="L140">        solverChoiceBox.valueProperty().addListener((obs, oldVal, newVal) -&gt; {</span>
+<span class="nc bnc" id="L141" title="All 4 branches missed.">            if (&quot;Cypher Solver&quot;.equals(newVal) &amp;&amp; this.neo == null) {</span>
+                // Si l'utilisateur choisit Cypher et n'est pas connecté, on le redirige
+<span class="nc" id="L143">                Alert alert = new Alert(Alert.AlertType.INFORMATION, &quot;The Cypher solver requires a Neo4j connection. Please log in.&quot;);</span>
+<span class="nc" id="L144">                alert.setHeaderText(&quot;Neo4j Connection Required&quot;);</span>
+<span class="nc" id="L145">                alert.showAndWait();</span>
+
+                // On prépare la navigation
+<span class="nc" id="L148">                nextScreen = &quot;choiceScreen&quot;; // Pour revenir ici après la connexion</span>
+<span class="nc" id="L149">                previousScreen = &quot;choiceScreen&quot;;</span>
+<span class="nc" id="L150">                initNeo4jLogInScreen();</span>
+<span class="nc" id="L151">                activate(&quot;neo4jLogInScreen&quot;);</span>
+            }
+<span class="nc" id="L153">        });</span>
+
+        // --- BOUTON DE SOUMISSION ---
+<span class="nc" id="L156">        Button submitButton = new Button(&quot;Check principles&quot;);</span>
+<span class="nc" id="L157">        submitButton.setStyle(&quot;-fx-background-color: #3498db; -fx-text-fill: white;&quot;);</span>
+<span class="nc" id="L158">        submitButton.setOnAction(e -&gt; {</span>
+<span class="nc" id="L159">            File timeFile = new File(timeFilePathField.getText());</span>
+<span class="nc bnc" id="L160" title="All 2 branches missed.">            if (!timeFile.isFile()) {</span>
+<span class="nc" id="L161">                new Alert(Alert.AlertType.ERROR, &quot;Time data file not found.&quot;).showAndWait();</span>
+<span class="nc" id="L162">                return;</span>
+            }
+<span class="nc" id="L164">            this.timeFile = timeFile;</span>
+
+            SolverInterface solver; // On utilise l'interface
+<span class="nc bnc" id="L167" title="All 2 branches missed.">            if (&quot;Prolog Solver&quot;.equals(solverChoiceBox.getValue())) {</span>
+<span class="nc" id="L168">                solver = new PrologSolver();</span>
+            } else {
+<span class="nc bnc" id="L170" title="All 2 branches missed.">                if (this.neo == null) {</span>
+<span class="nc" id="L171">                    new Alert(Alert.AlertType.ERROR, &quot;Please connect to Neo4j first to use the Cypher solver.&quot;).showAndWait();</span>
+<span class="nc" id="L172">                    return;</span>
+                }
+<span class="nc" id="L174">                neo.retrieveGraphDB(graph.getAbsolutePath());</span>
+<span class="nc" id="L175">                solver = new SolverCypher(this.neo);</span>
+            }
+
+<span class="nc" id="L178">            ArrayList&lt;String&gt; selectedPrinciples = new ArrayList&lt;&gt;();</span>
+<span class="nc bnc" id="L179" title="All 2 branches missed.">            if (principle1.isSelected()) selectedPrinciples.add(Issue.IssueType.LEGAL.typeName);</span>
+<span class="nc bnc" id="L180" title="All 2 branches missed.">            if (principle2.isSelected()) selectedPrinciples.add(Issue.IssueType.RIGHT_TO_ERASURE.typeName);</span>
+<span class="nc bnc" id="L181" title="All 2 branches missed.">            if (principle3.isSelected()) selectedPrinciples.add(Issue.IssueType.RIGHT_TO_ACCESS.typeName);</span>
+<span class="nc bnc" id="L182" title="All 2 branches missed.">            if (principle4.isSelected()) selectedPrinciples.add(Issue.IssueType.STORAGE_LIMITATION.typeName);</span>
+<span class="nc bnc" id="L183" title="All 2 branches missed.">            if (selectedPrinciples.isEmpty()) {</span>
+<span class="nc" id="L184">                selectedPrinciples.addAll(List.of(Issue.IssueType.LEGAL.typeName, Issue.IssueType.RIGHT_TO_ERASURE.typeName, Issue.IssueType.RIGHT_TO_ACCESS.typeName, Issue.IssueType.STORAGE_LIMITATION.typeName));</span>
+            }
+
+            // Le Converter n'est plus utile pour le SolveController mais peut l'être pour d'autres parties
+            // Pour l'instant on le laisse de côté pour la résolution.
+<span class="nc" id="L189">            solveController.setSolver(solver);</span>
+
+            try {
+                // On exécute la résolution. Le contrôleur ne se soucie pas de l'implémentation.
+<span class="nc" id="L193">                String resultsText = solver.solve(selectedPrinciples, this.graph.getAbsolutePath(), this.timeFile.getAbsolutePath());</span>
+<span class="nc" id="L194">                initResultsScreen(solver.getIssues(), resultsText);</span>
+<span class="nc" id="L195">                activate(&quot;resultsScreen&quot;);</span>
+<span class="nc" id="L196">            } catch (Exception err) {</span>
+<span class="nc" id="L197">                new Alert(Alert.AlertType.ERROR, &quot;An error occurred during solving: &quot; + err.getMessage()).showAndWait();</span>
+<span class="nc" id="L198">                err.printStackTrace();</span>
+<span class="nc" id="L199">            }</span>
+<span class="nc" id="L200">        });</span>
+
+        // --- MISE EN PAGE FINALE DE L'ÉCRAN ---
+        // NOTE: Le code des options avancées est complexe et spécifique à votre parser.
+        // Il doit être inséré dans le `choiceVBox` si vous souhaitez le conserver.
+<span class="nc" id="L205">        ScrollPane scroll = new ScrollPane(choiceVBox);</span>
+<span class="nc" id="L206">        scroll.setFitToWidth(true);</span>
+<span class="nc" id="L207">        Button returnBtn = new Button(&quot;Previous&quot;);</span>
+<span class="nc" id="L208">        returnBtn.setOnAction(e -&gt; activate(&quot;graphPathScreen&quot;));</span>
+<span class="nc" id="L209">        HBox buttonBar = new HBox(10, submitButton, returnBtn);</span>
+<span class="nc" id="L210">        VBox mainLayout = new VBox(10, scroll, buttonBar);</span>
+<span class="nc" id="L211">        mainLayout.setPadding(new Insets(10));</span>
+
+<span class="nc" id="L213">        screenMap.put(&quot;choiceScreen&quot;, mainLayout);</span>
+<span class="nc" id="L214">    }</span>
+
+
+    /**
+     * Initialises the Neo4J login screen, where the user is invited to put credentials to access the GraphDB.
+     */
+    public void initNeo4jLogInScreen() {
+<span class="nc" id="L221">        VBox neo4jLogInScreen = new VBox(10);</span>
+<span class="nc" id="L222">        neo4jLogInScreen.setPadding(new Insets(20, 20, 20, 20));</span>
+
+        /* ── form controls ─────────────────────────────────────── */
+<span class="nc" id="L225">        Label uriLbl  = new Label(&quot;Database URI&quot;);</span>
+<span class="nc" id="L226">        Label userLbl = new Label(&quot;User&quot;);</span>
+<span class="nc" id="L227">        Label pwdLbl  = new Label(&quot;Password&quot;);</span>
+
+<span class="nc" id="L229">        TextField     uriField  = new TextField();</span>
+<span class="nc" id="L230">        TextField     userField = new TextField();</span>
+<span class="nc" id="L231">        PasswordField pwdField  = new PasswordField();</span>
+
+<span class="nc" id="L233">        uriField.setPromptText(&quot;bolt://localhost:7687&quot;);</span>
+<span class="nc" id="L234">        userField.setPromptText(&quot;neo4j&quot;);                 // ← fixed typo</span>
+<span class="nc" id="L235">        pwdField.setPromptText(&quot;••••••&quot;);</span>
+
+<span class="nc" id="L237">        Button backBtn = new Button(&quot;Previous&quot;);</span>
+<span class="nc" id="L238">        Button loadBtn = new Button(&quot;Load&quot;);</span>
+
+<span class="nc" id="L240">        backBtn.setOnAction(e -&gt; activate(previousScreen));</span>
+
+        /* ── load button logic ─────────────────────────────────── */
+<span class="nc" id="L243">        loadBtn.setOnAction(e -&gt; {</span>
+        /* ------------------------------------------------------------------
+           1.  Build a proper URI (add bolt:// if missing, trim blanks)
+         ------------------------------------------------------------------ */
+<span class="nc" id="L247">            String uriText = uriField.getText().trim();</span>
+<span class="nc bnc" id="L248" title="All 2 branches missed.">            if (!uriText.startsWith(&quot;bolt://&quot;) &amp;&amp;</span>
+<span class="nc bnc" id="L249" title="All 2 branches missed.">                    !uriText.startsWith(&quot;neo4j://&quot;) &amp;&amp;</span>
+<span class="nc bnc" id="L250" title="All 2 branches missed.">                    !uriText.startsWith(&quot;bolt+s://&quot;) &amp;&amp;</span>
+<span class="nc bnc" id="L251" title="All 2 branches missed.">                    !uriText.startsWith(&quot;neo4j+s://&quot;))</span>
+            {
+<span class="nc" id="L253">                uriText = &quot;bolt://&quot; + uriText;</span>
+            }
+
+        /* ------------------------------------------------------------------
+           2.  Prepare helper + flags
+         ------------------------------------------------------------------ */
+<span class="nc" id="L259">            neo = new Neo4jInterface();</span>
+<span class="nc" id="L260">            neo.setParameters(uriText, userField.getText().trim(), pwdField.getText());</span>
+<span class="nc" id="L261">            pwdField.clear();</span>
+
+<span class="nc" id="L263">            boolean cypherLogin =</span>
+<span class="nc bnc" id="L264" title="All 2 branches missed.">                    &quot;choiceScreen&quot;.equals(nextScreen) &amp;&amp;</span>
+<span class="nc bnc" id="L265" title="All 2 branches missed.">                            &quot;choiceScreen&quot;.equals(previousScreen);</span>
+
+            try {
+            /* ------------------------------------------------------------------
+               3.  Always verify credentials first so we fail fast
+             ------------------------------------------------------------------ */
+<span class="nc" id="L271">                try (var drv = org.neo4j.driver.GraphDatabase.driver(</span>
+                        uriText,
+<span class="nc" id="L273">                        org.neo4j.driver.AuthTokens.basic(userField.getText().trim(),</span>
+<span class="nc" id="L274">                                neo.getPassword())))</span>
+                {
+<span class="nc" id="L276">                    drv.verifyConnectivity();          // throws on bad creds / URI</span>
+                }
+
+            /* ------------------------------------------------------------------
+               4.  Branch-specific behaviour
+             ------------------------------------------------------------------ */
+<span class="nc bnc" id="L282" title="All 2 branches missed.">                if (&quot;graphVizScreen&quot;.equals(nextScreen)) {</span>
+                    /* Visualisation flow */
+<span class="nc" id="L284">                    System.out.println(&quot;Loading provenance graph from &quot; + graph.getPath());</span>
+<span class="nc" id="L285">                    neo.retrieveGraphDB(graph.getAbsolutePath());</span>
+<span class="nc" id="L286">                    initGraphVizScreen(&quot;MATCH (n)-[r]-&gt;(m) RETURN *&quot;);</span>
+
+<span class="nc bnc" id="L288" title="All 2 branches missed.">                } else if (!cypherLogin) {</span>
+                    /* “Import from Neo4j” flow */
+<span class="nc" id="L290">                    neo.retrievePrologPG();</span>
+<span class="nc" id="L291">                    File pg = new File(neo.generatedPrologGraphPath);</span>
+<span class="nc bnc" id="L292" title="All 2 branches missed.">                    if (pg.isFile()) {</span>
+<span class="nc" id="L293">                        this.graph = pg;</span>
+<span class="nc" id="L294">                        initChoiceScreen();</span>
+                    }
+                }
+<span class="nc" id="L297">                activate(nextScreen);</span>
+
+<span class="nc" id="L299">            } catch (org.neo4j.driver.exceptions.AuthenticationException ex) {</span>
+<span class="nc" id="L300">                new Alert(Alert.AlertType.ERROR,</span>
+                        &quot;Authentication failed – please check user name / password.&quot;)
+<span class="nc" id="L302">                        .showAndWait();</span>
+
+<span class="nc" id="L304">            } catch (org.neo4j.driver.exceptions.ServiceUnavailableException ex) {</span>
+<span class="nc" id="L305">                new Alert(Alert.AlertType.ERROR,</span>
+                        &quot;Cannot reach Neo4j at \&quot;&quot; + uriText +
+                                &quot;\&quot;.  Make sure the DB is running and the port is correct.&quot;)
+<span class="nc" id="L308">                        .showAndWait();</span>
+
+<span class="nc" id="L310">            } catch (Exception ex) {</span>
+<span class="nc" id="L311">                new Alert(Alert.AlertType.ERROR,</span>
+<span class="nc" id="L312">                        &quot;Neo4j operation failed:\n&quot; + ex.getMessage())</span>
+<span class="nc" id="L313">                        .showAndWait();</span>
+<span class="nc" id="L314">                ex.printStackTrace();</span>
+<span class="nc" id="L315">            }</span>
+<span class="nc" id="L316">        });</span>
+
+        /* ── assemble ──────────────────────────────────────────── */
+<span class="nc" id="L319">        neo4jLogInScreen.getChildren().addAll(</span>
+                uriLbl,  uriField,
+                userLbl, userField,
+                pwdLbl,  pwdField,
+                loadBtn, backBtn
+        );
+<span class="nc" id="L325">        screenMap.put(&quot;neo4jLogInScreen&quot;, neo4jLogInScreen);</span>
+<span class="nc" id="L326">    }</span>
+
+
+    /**
+     * Initialises a screen with hints on the time data file structure required.
+     */
+    public void initTimesHelpScreen() {
+<span class="nc" id="L333">        VBox timesHelpScreen = new VBox(10);</span>
+<span class="nc" id="L334">        timesHelpScreen.setPadding(new Insets(20, 20, 20, 20));</span>
+
+<span class="nc" id="L336">        Label helpText = new Label(&quot;Time data file contains time limits (maximum allowed delay for erasing, sending and retaining unused data) and the time at which the verification occurs.\nThe file respects the following format :&quot;);</span>
+<span class="nc" id="L337">        helpText.setWrapText(true);</span>
+<span class="nc" id="L338">        Label format = new Label(&quot;tCurrent(&lt;Time&gt;).\n&quot; +</span>
+                &quot;tLimit('access',&lt;Time&gt;).\n&quot; +
+                &quot;tLimit('erase',&lt;Time&gt;).\n&quot; +
+                &quot;tLimit('storage',&lt;Time&gt;).&quot;);
+<span class="nc" id="L342">        format.setWrapText(true);</span>
+
+<span class="nc" id="L344">        Button returnButton = new Button(&quot;Previous&quot;);</span>
+<span class="nc" id="L345">        returnButton.setOnAction(e -&gt; {</span>
+<span class="nc" id="L346">            activate(&quot;choiceScreen&quot;);</span>
+<span class="nc" id="L347">        });</span>
+
+<span class="nc" id="L349">        timesHelpScreen.getChildren().addAll(helpText, format, returnButton);</span>
+<span class="nc" id="L350">        screenMap.put(&quot;timesHelpScreen&quot;, timesHelpScreen);</span>
+
+<span class="nc" id="L352">    }</span>
+
+    /**
+     * MODIFIÉ : Propose maintenant deux options de visualisation pour un flux cohérent.
+     * @param issues La liste des objets Issue générée par le solveur.
+     * @param resultsText La chaîne de caractères brute retournée par le solveur (pour le cas &quot;OK&quot;).
+     */
+    public void initResultsScreen(List&lt;Issue&gt; issues, String resultsText) {
+<span class="nc" id="L360">        VBox resultsVBox = new VBox(10);</span>
+<span class="nc" id="L361">        resultsVBox.setPadding(new Insets(20, 20, 20, 20));</span>
+<span class="nc" id="L362">        Label label = new Label(&quot;Results:&quot;);</span>
+
+<span class="nc" id="L364">        ListView&lt;Issue&gt; listView = new ListView&lt;&gt;();</span>
+        // On rend la liste non-éditable mais sélectionnable
+<span class="nc" id="L366">        listView.setEditable(false);</span>
+
+<span class="nc bnc" id="L368" title="All 2 branches missed.">        if (issues.isEmpty()) {</span>
+<span class="nc" id="L369">            listView.getItems().add(null);</span>
+<span class="nc" id="L370">            listView.setCellFactory(lv -&gt; new ListCell&lt;&gt;() {</span>
+                @Override
+                protected void updateItem(Issue item, boolean empty) {
+<span class="nc" id="L373">                    super.updateItem(item, empty);</span>
+<span class="nc bnc" id="L374" title="All 2 branches missed.">                    setText(empty ? null : resultsText);</span>
+<span class="nc" id="L375">                }</span>
+            });
+        } else {
+            // On utilise la méthode de rendu toString() que nous avons définie dans la classe Issue
+<span class="nc" id="L379">            listView.setItems(FXCollections.observableArrayList(issues));</span>
+        }
+
+        // --- CHANGEMENT : DEUX BOUTONS DE VISUALISATION ---
+
+        // 1. Bouton pour voir le graphe complet
+        // --- NOUVELLE LOGIQUE POUR LE BOUTON ---
+<span class="nc" id="L386">        Button visualizeFullGraphBtn = new Button(&quot;Visualize Full Graph&quot;);</span>
+<span class="nc" id="L387">        visualizeFullGraphBtn.setOnAction(e -&gt; {</span>
+<span class="nc" id="L388">            previousScreen = &quot;resultsScreen&quot;;</span>
+
+<span class="nc bnc" id="L390" title="All 2 branches missed.">            if (neo == null) {</span>
+                // Si pas de connexion, on demande à l'utilisateur de se connecter
+<span class="nc" id="L392">                Alert alert = new Alert(Alert.AlertType.CONFIRMATION, &quot;A Neo4j connection is required. This will load the current provenance graph into the database. Continue?&quot;, ButtonType.YES, ButtonType.NO);</span>
+<span class="nc" id="L393">                alert.showAndWait();</span>
+
+<span class="nc bnc" id="L395" title="All 2 branches missed.">                if (alert.getResult() == ButtonType.YES) {</span>
+<span class="nc" id="L396">                    nextScreen = &quot;graphVizScreen&quot;; // La destination après la connexion</span>
+<span class="nc" id="L397">                    initNeo4jLogInScreen(); // On prépare l'écran de connexion</span>
+<span class="nc" id="L398">                    activate(&quot;neo4jLogInScreen&quot;); // On l'active</span>
+                }
+<span class="nc" id="L400">            } else {</span>
+                // Si on est déjà connecté (par exemple, après un run du Cypher Solver),
+                // on charge simplement le graphe et on l'affiche
+<span class="nc" id="L403">                System.out.println(&quot;Reloading full graph into Neo4j for visualization...&quot;);</span>
+<span class="nc" id="L404">                neo.retrieveGraphDB(this.graph.getAbsolutePath());</span>
+<span class="nc" id="L405">                initGraphVizScreen(&quot;MATCH (n)-[r]-&gt;(m) RETURN n,r,m&quot;); // On limite pour la performance</span>
+<span class="nc" id="L406">                activate(&quot;graphVizScreen&quot;);</span>
+            }
+<span class="nc" id="L408">        });</span>
+
+        // 2. Bouton pour voir le détail d'une issue sélectionnée
+<span class="nc" id="L411">        Button visualizeIssueBtn = new Button(&quot;Visualize Selected Issue&quot;);</span>
+<span class="nc" id="L412">        visualizeIssueBtn.setOnAction(e -&gt; {</span>
+<span class="nc" id="L413">            Issue selectedIssue = listView.getSelectionModel().getSelectedItem();</span>
+<span class="nc bnc" id="L414" title="All 2 branches missed.">            if (selectedIssue != null) {</span>
+<span class="nc" id="L415">                previousScreen = &quot;resultsScreen&quot;;</span>
+<span class="nc" id="L416">                initGraphVizScreen(selectedIssue.toCypherQuery());</span>
+<span class="nc" id="L417">                activate(&quot;graphVizScreen&quot;);</span>
+            } else {
+<span class="nc" id="L419">                new Alert(Alert.AlertType.INFORMATION, &quot;Please select an issue from the list first.&quot;).showAndWait();</span>
+            }
+<span class="nc" id="L421">        });</span>
+        // Le bouton de détail n'est activé que s'il y a des violations
+<span class="nc" id="L423">        visualizeIssueBtn.setDisable(issues.isEmpty());</span>
+
+<span class="nc" id="L425">        Button newVerifBtn = new Button(&quot;New Compliance Checking&quot;);</span>
+<span class="nc" id="L426">        newVerifBtn.setOnAction(e -&gt; {</span>
+            try {
+<span class="nc" id="L428">                initChoiceScreen();</span>
+<span class="nc" id="L429">                activate(&quot;choiceScreen&quot;);</span>
+<span class="nc" id="L430">            } catch (IOException ex) {</span>
+<span class="nc" id="L431">                throw new RuntimeException(ex);</span>
+<span class="nc" id="L432">            }</span>
+<span class="nc" id="L433">        });</span>
+
+        // On ajoute les boutons dans une HBox pour un meilleur agencement
+<span class="nc" id="L436">        HBox buttonBar = new HBox(10, visualizeFullGraphBtn, visualizeIssueBtn, newVerifBtn);</span>
+
+<span class="nc" id="L438">        resultsVBox.getChildren().addAll(label, listView, buttonBar);</span>
+<span class="nc" id="L439">        screenMap.put(&quot;resultsScreen&quot;, resultsVBox);</span>
+<span class="nc" id="L440">    }</span>
+
+    /**
+     * Exécute une requête Cypher et imprime ses résultats bruts dans la console.
+     * @param query La requête à exécuter pour le débogage.
+     */
+    private void printQueryResultsToConsole(String query) {
+<span class="nc" id="L447">        System.out.println(&quot;\n-------------------------------------------------&quot;);</span>
+<span class="nc" id="L448">        System.out.println(&quot;--- DEBUGGING SUBGRAPH DATA IN CONSOLE ---&quot;);</span>
+<span class="nc" id="L449">        System.out.println(&quot;Query: &quot; + query);</span>
+
+        try {
+<span class="nc bnc" id="L452" title="All 2 branches missed.">            if (neo == null) {</span>
+<span class="nc" id="L453">                System.out.println(&quot;--&gt; Neo4j connection not available. Cannot fetch data for console.&quot;);</span>
+<span class="nc" id="L454">                return;</span>
+            }
+
+            // Exécute la requête pour récupérer les données
+<span class="nc" id="L458">            List&lt;org.neo4j.driver.Record&gt; records = neo.executeQuery(query, Collections.emptyMap());</span>
+
+<span class="nc bnc" id="L460" title="All 2 branches missed.">            if (records.isEmpty()) {</span>
+<span class="nc" id="L461">                System.out.println(&quot;--&gt; Query returned no results for console display.&quot;);</span>
+            } else {
+<span class="nc" id="L463">                System.out.println(&quot;--&gt; Query Results (&quot; + records.size() + &quot; rows found):&quot;);</span>
+<span class="nc" id="L464">                int recordCounter = 1;</span>
+<span class="nc bnc" id="L465" title="All 2 branches missed.">                for (org.neo4j.driver.Record record : records) {</span>
+<span class="nc" id="L466">                    System.out.println(&quot;    [Record &quot; + recordCounter++ + &quot;]&quot;);</span>
+<span class="nc" id="L467">                    record.fields().forEach(field -&gt; {</span>
+<span class="nc" id="L468">                        String key = field.key();</span>
+<span class="nc" id="L469">                        Object value = field.value().asObject();</span>
+<span class="nc" id="L470">                        System.out.println(String.format(&quot;      - %s: %s&quot;, key, value));</span>
+<span class="nc" id="L471">                    });</span>
+<span class="nc" id="L472">                }</span>
+            }
+<span class="nc" id="L474">        } catch (Exception e) {</span>
+<span class="nc" id="L475">            System.err.println(&quot;Error during console debug query execution: &quot; + e.getMessage());</span>
+        } finally {
+<span class="nc" id="L477">            System.out.println(&quot;-------------------------------------------------\n&quot;);</span>
+        }
+<span class="nc" id="L479">    }</span>
+
+
+
+
+    /**
+     * Initialises the graph visualisation screen. The display comes from an HTML page generated according to the visualisation needs :
+     * the query tells which elements of the GraphDB should be displayed.
+     * @param query CYPHER query stating the GraphDB elements to display
+     */
+    public void initGraphVizScreen(String query) {
+<span class="nc" id="L490">        printQueryResultsToConsole(query);</span>
+<span class="nc" id="L491">        VBox graphVizScreen = new VBox(10);</span>
+<span class="nc" id="L492">        graphVizScreen.setPadding(new Insets(20, 20, 20, 20));</span>
+<span class="nc" id="L493">        HBox graphVizAndIssuesScreen = new HBox(10);</span>
+
+<span class="nc" id="L495">        WebView webView = new WebView();</span>
+<span class="nc" id="L496">        WebEngine webEngine = webView.getEngine();</span>
+
+        // 1. On génère le fichier HTML &quot;squelette&quot; SANS les identifiants
+<span class="nc" id="L499">        neo.buildVizHtmlFile(query);</span>
+<span class="nc" id="L500">        String url = Objects.requireNonNull(getClass().getResource(&quot;/index.html&quot;)).toExternalForm();</span>
+
+        // 2. On ajoute un &quot;écouteur&quot; qui attend que la page soit complètement chargée
+<span class="nc" id="L503">        webEngine.getLoadWorker().stateProperty().addListener(</span>
+                (obs, oldState, newState) -&gt; {
+                    // 3. Quand la page est prête (état SUCCEEDED)...
+<span class="nc bnc" id="L506" title="All 2 branches missed.">                    if (newState == Worker.State.SUCCEEDED) {</span>
+<span class="nc" id="L507">                        System.out.println(&quot;[DEBUG] WebView loaded. Injecting credentials and calling draw().&quot;);</span>
+                        // ... on exécute notre fonction Javascript en lui passant les identifiants
+<span class="nc" id="L509">                        String script = String.format(&quot;draw('%s', '%s', '%s');&quot;,</span>
+<span class="nc" id="L510">                                neo.getUri(), neo.getUser(), neo.getPassword());</span>
+<span class="nc" id="L511">                        webEngine.executeScript(script);</span>
+                    }
+<span class="nc" id="L513">                }</span>
+        );
+
+        // 4. On charge la page HTML (qui attendra notre appel de script)
+<span class="nc" id="L517">        webEngine.load(url);</span>
+
+        // Le reste de votre logique pour afficher la liste des issues reste identique
+<span class="nc bnc" id="L520" title="All 2 branches missed.">        if (previousScreen.equals(&quot;resultsScreen&quot;)) {</span>
+<span class="nc" id="L521">            ObservableList&lt;Issue&gt; issues = FXCollections.observableArrayList(solveController.getSolver().getIssues());</span>
+<span class="nc" id="L522">            final ListView&lt;Issue&gt; listView = new ListView&lt;&gt;(issues);</span>
+<span class="nc" id="L523">            listView.setPrefSize(400, 450);</span>
+
+            // Votre code pour le bouton Reload reste valide
+<span class="nc" id="L526">            Button reloadButton = new Button(&quot;Reload for Selected Issue&quot;);</span>
+<span class="nc" id="L527">            reloadButton.setOnAction(e -&gt; {</span>
+<span class="nc" id="L528">                Issue issue = listView.getSelectionModel().getSelectedItem();</span>
+<span class="nc bnc" id="L529" title="All 2 branches missed.">                if (issue != null) {</span>
+<span class="nc" id="L530">                    String cypher = issue.toCypherQuery();</span>
+<span class="nc" id="L531">                    neo.buildVizHtmlFile(cypher); // Regénère le HTML avec la nouvelle requête</span>
+<span class="nc" id="L532">                    webEngine.reload(); // Recharge la page, ce qui redéclenchera l'écouteur</span>
+                }
+<span class="nc" id="L534">            });</span>
+<span class="nc" id="L535">            VBox issuesScreen = new VBox(10, listView, reloadButton);</span>
+<span class="nc" id="L536">            graphVizAndIssuesScreen.getChildren().add(issuesScreen);</span>
+        }
+
+<span class="nc" id="L539">        Button returnButton = new Button(&quot;Previous&quot;);</span>
+<span class="nc" id="L540">        returnButton.setOnAction(e -&gt; activate(previousScreen));</span>
+
+<span class="nc" id="L542">        graphVizAndIssuesScreen.getChildren().add(webView);</span>
+<span class="nc" id="L543">        graphVizScreen.getChildren().addAll(graphVizAndIssuesScreen, returnButton);</span>
+<span class="nc" id="L544">        screenMap.put(&quot;graphVizScreen&quot;, graphVizScreen);</span>
+<span class="nc" id="L545">    }</span>
+
+    /**
+     * Displays a screen.
+     * @param name Screen name (the one under which the screen was put to the screenMap)
+     */
+<span class="nc" id="L551">    public void activate(String name) { main.setRoot(screenMap.get(name)); }</span>
+
+<span class="nc" id="L553">    public Pane getBasePane() { return screenMap.get(&quot;graphPathScreen&quot;); }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.12.202403310830</span></div></body></html>

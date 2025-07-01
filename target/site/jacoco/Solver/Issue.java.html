@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="fr"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Issue.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ter</a> &gt; <a href="index.source.html" class="el_package">Solver</a> &gt; <span class="el_source">Issue.java</span></div><h1>Issue.java</h1><pre class="source lang-java linenums">package Solver;
+
+import org.jpl7.Term;
+import org.neo4j.driver.Record;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+
+public class Issue {
+
+    /**
+     * Un Enum pour définir les types de violation de manière propre et sûre.
+     * Placé à l'intérieur de la classe pour garder tout dans un seul fichier.
+     */
+<span class="fc" id="L15">    public enum IssueType {</span>
+<span class="fc" id="L16">        LEGAL(&quot;legal&quot;),</span>
+<span class="fc" id="L17">        RIGHT_TO_ACCESS(&quot;rightAccess&quot;),</span>
+<span class="fc" id="L18">        RIGHT_TO_ERASURE(&quot;eraseCompliant&quot;),</span>
+<span class="fc" id="L19">        STORAGE_LIMITATION(&quot;storageLimitation&quot;),</span>
+<span class="fc" id="L20">        UNKNOWN(&quot;unknown&quot;);</span>
+
+        public final String typeName;
+
+<span class="fc" id="L24">        IssueType(String typeName) { this.typeName = typeName; }</span>
+
+        public static IssueType fromString(String text) {
+<span class="pc bpc" id="L27" title="1 of 2 branches missed.">            for (IssueType b : IssueType.values()) {</span>
+<span class="fc bfc" id="L28" title="All 2 branches covered.">                if (b.typeName.equalsIgnoreCase(text)) {</span>
+<span class="fc" id="L29">                    return b;</span>
+                }
+            }
+<span class="nc" id="L32">            return UNKNOWN;</span>
+        }
+    }
+
+    // --- CHAMPS DE LA CLASSE ---
+
+    private final IssueType type;
+    // CHANGEMENT MAJEUR : On utilise une Map&lt;String, Object&gt; générique au lieu de dépendre de Term.
+    private final Map&lt;String, Object&gt; properties;
+    private final int id;
+    // CHANGEMENT : On utilise un compteur thread-safe pour les ID.
+<span class="fc" id="L43">    private static final AtomicInteger counter = new AtomicInteger(0);</span>
+
+    // --- CONSTRUCTEURS ---
+
+    /**
+     * Constructeur pour les résultats venant du solveur Prolog.
+     * Il prend les anciens termes Prolog et les convertit dans notre Map générique.
+     * @param type Le type de violation (sous forme de String, pour la compatibilité).
+     * @param prologProperties La map des résultats de JPL7.
+     */
+<span class="nc" id="L53">    public Issue(String type, HashMap&lt;String, Term&gt; prologProperties) {</span>
+<span class="nc" id="L54">        this.type = IssueType.fromString(type);</span>
+<span class="nc" id="L55">        this.properties = new HashMap&lt;&gt;();</span>
+        // On convertit les Term en String pour les stocker de manière uniforme.
+<span class="nc" id="L57">        prologProperties.forEach((key, value) -&gt; {</span>
+<span class="nc" id="L58">            this.properties.put(key, value.toString().replace(&quot;'&quot;, &quot;&quot;));</span>
+<span class="nc" id="L59">        });</span>
+<span class="nc" id="L60">        this.id = counter.incrementAndGet();</span>
+<span class="nc" id="L61">    }</span>
+
+    /**
+     * Constructeur pour les résultats venant du solveur Cypher.
+     * @param type Le type de violation (notre Enum).
+     * @param cypherRecord L'enregistrement retourné par le driver Neo4j.
+     */
+<span class="fc" id="L68">    public Issue(IssueType type, Record cypherRecord) {</span>
+<span class="fc" id="L69">        this.type = type;</span>
+        // La méthode asMap() du driver Neo4j fait tout le travail pour nous !
+<span class="fc" id="L71">        this.properties = cypherRecord.asMap();</span>
+<span class="fc" id="L72">        this.id = counter.incrementAndGet();</span>
+<span class="fc" id="L73">    }</span>
+
+    // --- GETTERS ---
+
+<span class="nc" id="L77">    public int getId() { return id; }</span>
+<span class="nc" id="L78">    public IssueType getIssueType() { return type; }</span>
+<span class="nc" id="L79">    public String getType() { return type.typeName; } // Pour la compatibilité avec l'ancien code</span>
+<span class="nc" id="L80">    public Map&lt;String, Object&gt; getProperties() { return properties; }</span>
+
+
+    // --- MÉTHODES D'AFFICHAGE ET DE VISUALISATION ---
+
+    /**
+     * Génère le message lisible pour l'interface utilisateur.
+     * La logique est la même, mais adaptée pour utiliser l'Enum et les bonnes clés.
+     */
+    @Override
+    public String toString() {
+<span class="fc" id="L91">        String template = TEMPLATES.getOrDefault(this.type, &quot;[%d] ISSUE – details unavailable\n&quot;);</span>
+
+<span class="pc bpc" id="L93" title="1 of 5 branches missed.">        return switch (type) {</span>
+            // Note : Pour 'legal', la clé est maintenant 'D_used' pour correspondre à notre requête Cypher.
+<span class="fc" id="L95">            case LEGAL -&gt; String.format(template, id, safe(properties.get(&quot;P&quot;)), safe(properties.get(&quot;D&quot;)), safe(properties.get(&quot;PU&quot;)), safe(properties.get(&quot;T&quot;)));</span>
+<span class="fc" id="L96">            case RIGHT_TO_ACCESS -&gt; String.format(template, id, safe(properties.get(&quot;S&quot;)), safe(properties.get(&quot;TE&quot;)));</span>
+<span class="fc" id="L97">            case RIGHT_TO_ERASURE -&gt; String.format(template, id, safe(properties.get(&quot;D&quot;)), safe(properties.get(&quot;T&quot;)));</span>
+<span class="fc" id="L98">            case STORAGE_LIMITATION -&gt; String.format(template, id, safe(properties.get(&quot;D&quot;)), safe(properties.get(&quot;TU&quot;))); // TU pour Storage</span>
+<span class="nc" id="L99">            default -&gt; String.format(template, id);</span>
+        };
+    }
+
+    // Dans la classe Solver.Issue, remplacez la méthode toCypherQuery existante par celle-ci :
+
+    /**
+     * Génère une requête Cypher pour visualiser le contexte d'une issue,
+     * en incluant maintenant l'agent qui contrôle le processus.
+     */
+    public String toCypherQuery() {
+        // Les variables sont extraites des propriétés de l'issue
+<span class="nc" id="L111">        final String P = quoted(properties.get(&quot;P&quot;));</span>
+<span class="nc" id="L112">        final String D = quoted(properties.getOrDefault(&quot;D&quot;, properties.get(&quot;D_used&quot;)));</span>
+<span class="nc" id="L113">        final String S = quoted(properties.get(&quot;S&quot;));</span>
+<span class="nc bnc" id="L114" title="All 2 branches missed.">        final String T = properties.get(&quot;T&quot;) != null</span>
+<span class="nc" id="L115">                ? properties.get(&quot;T&quot;).toString()</span>
+<span class="nc" id="L116">                : properties.getOrDefault(&quot;TU&quot;, properties.get(&quot;TE&quot;)).toString();</span>
+
+        String rawQuery;
+<span class="nc bnc" id="L119" title="All 4 branches missed.">        switch (type) {</span>
+            case LEGAL:
+            case RIGHT_TO_ERASURE:
+                // CHANGEMENT : Le chemin inclut maintenant (Agent)-[:wasControlledBy]-&gt;(Process)
+<span class="nc" id="L123">                rawQuery = String.format(</span>
+                        &quot;MATCH path = (agent:Agent)&lt;-[:wasControlledBy]-(p:Process {name:%s})-[r:used]-&gt;(d:Artifact {name:%s}) WHERE r.TU = %s RETURN path&quot;,
+                        P, D, T
+                );
+<span class="nc" id="L127">                break;</span>
+
+            case RIGHT_TO_ACCESS:
+                // PAS DE CHANGEMENT : L'agent était déjà le point de départ de la requête.
+<span class="nc" id="L131">                rawQuery = String.format(</span>
+                        &quot;MATCH path = (a:Agent {name:%s})&lt;-[r:wasControlledBy]-(p:Process {action:'askDataAccess'}) WHERE r.TE = %s RETURN path&quot;,
+                        S, T
+                );
+<span class="nc" id="L135">                break;</span>
+
+            case STORAGE_LIMITATION:
+                // CHANGEMENT : Le chemin identifie maintenant le processus et l'agent qui l'a contrôlé.
+<span class="nc" id="L139">                rawQuery = String.format(</span>
+                        &quot;MATCH path = (agent:Agent)&lt;-[:wasControlledBy]-(p:Process)-[r:used]-&gt;(d:Artifact {name:%s}) WHERE r.TU = %s RETURN path&quot;,
+                        D, T
+                );
+<span class="nc" id="L143">                break;</span>
+
+            default:
+<span class="nc" id="L146">                rawQuery = &quot;MATCH (n)-[r]-(m) RETURN n,r,m&quot;;</span>
+                break;
+        }
+
+        // Nettoyage de la requête pour éviter les erreurs de syntaxe dues aux espaces.
+<span class="nc" id="L151">        return rawQuery.replaceAll(&quot;\\s+&quot;, &quot; &quot;).trim();</span>
+    }
+
+    // --- MÉTHODES UTILITAIRES ---
+
+    private static String safe(Object o) {
+<span class="pc bpc" id="L157" title="1 of 2 branches missed.">        return o == null ? &quot;?&quot; : o.toString();</span>
+    }
+
+    private static String quoted(Object o) {
+<span class="nc bnc" id="L161" title="All 2 branches missed.">        if (o == null) return &quot;null&quot;;</span>
+<span class="nc" id="L162">        String s = o.toString().trim();</span>
+        // S'assure que les valeurs numériques ne sont pas entourées d'apostrophes pour Cypher
+<span class="nc bnc" id="L164" title="All 2 branches missed.">        if (s.matches(&quot;-?\\d+(\\.\\d+)?&quot;)) {</span>
+<span class="nc" id="L165">            return s;</span>
+        }
+<span class="nc bnc" id="L167" title="All 2 branches missed.">        return s.startsWith(&quot;'&quot;) ? s : &quot;'&quot; + s + &quot;'&quot;;</span>
+    }
+
+    // On utilise notre Enum comme clé pour la Map, c'est plus sûr.
+<span class="fc" id="L171">    private static final Map&lt;IssueType, String&gt; TEMPLATES = Map.of(</span>
+            IssueType.LEGAL, &quot;[%d] CONSENT ISSUE – process %s used %s for purpose %s at time %s without consent\n&quot;,
+            IssueType.RIGHT_TO_ACCESS, &quot;[%d] ACCESS REQUEST ISSUE – subject %s asked for access at time %s and was not sent data in time\n&quot;,
+            IssueType.RIGHT_TO_ERASURE, &quot;[%d] ERASE REQUEST ISSUE – erase of data %s was asked at %s but not done in time\n&quot;,
+            IssueType.STORAGE_LIMITATION, &quot;[%d] STORAGE LIMITATION ISSUE – data %s was last used at %s and not deleted in time\n&quot;
+    );
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.12.202403310830</span></div></body></html>

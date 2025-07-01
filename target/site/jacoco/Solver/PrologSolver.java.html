@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="fr"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PrologSolver.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ter</a> &gt; <a href="index.source.html" class="el_package">Solver</a> &gt; <span class="el_source">PrologSolver.java</span></div><h1>PrologSolver.java</h1><pre class="source lang-java linenums">package Solver;
+
+import Traducteur.Parser;
+import org.apache.commons.io.IOUtils;
+import org.jpl7.*;
+import org.jpl7.Integer; // Important: garder l'import de jpl7 pour la compatibilité
+
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+
+// CHANGEMENT : Renommage et implémentation de l'interface
+public class PrologSolver implements SolverInterface {
+
+    // --- CHAMPS DE LA CLASSE (INCHANGÉS) ---
+    private String provenanceGraphPath;
+    private String timeDataPath;
+    private List&lt;Issue&gt; issues;
+    private List&lt;String&gt; personalData;
+    private List&lt;String&gt; users;
+    private List&lt;String&gt; process;
+<span class="nc" id="L23">    private final Set&lt;String&gt; filesLoad = new HashSet&lt;&gt;();</span>
+<span class="nc" id="L24">    private final Set&lt;String&gt; predicatesLoad = new HashSet&lt;&gt;();</span>
+
+    // --- CONSTRUCTEURS (INCHANGÉS) ---
+<span class="nc" id="L27">    public PrologSolver(String provenanceGraphPath, String timeDataPath, List&lt;String&gt; queries) throws IOException {</span>
+<span class="nc" id="L28">        setProvenanceGraphPath(provenanceGraphPath);</span>
+<span class="nc" id="L29">        this.timeDataPath = timeDataPath; // setTimeFilePath est privé maintenant</span>
+<span class="nc" id="L30">    }</span>
+<span class="nc" id="L31">    public PrologSolver() {}</span>
+
+    // --- SETTERS (certains deviennent privés ou sont moins utilisés) ---
+    public void setProvenanceGraphPath(String provenanceGraphPath) throws IOException {
+<span class="nc" id="L35">        this.provenanceGraphPath = provenanceGraphPath;</span>
+<span class="nc" id="L36">        Parser parser = new Parser(new File(provenanceGraphPath));</span>
+<span class="nc" id="L37">        this.personalData = parser.parserData();</span>
+<span class="nc" id="L38">        this.users = parser.parserUser();</span>
+<span class="nc" id="L39">        this.process = parser.parserProcess();</span>
+<span class="nc" id="L40">    }</span>
+    private void setTimeFilePath(String timeDataPath){
+<span class="nc" id="L42">        this.timeDataPath = timeDataPath;</span>
+<span class="nc" id="L43">    }</span>
+
+    // --- MÉTHODE SOLVE ADAPTÉE ---
+    @Override
+    public String solve(List&lt;String&gt; principles, String provenanceGraphPath, String timeDataPath) throws IOException {
+        // Initialisation des variables pour cette exécution spécifique
+<span class="nc" id="L49">        setProvenanceGraphPath(provenanceGraphPath);</span>
+<span class="nc" id="L50">        setTimeFilePath(timeDataPath);</span>
+<span class="nc" id="L51">        this.issues = new ArrayList&lt;&gt;(); // resetStoredIssues()</span>
+
+        // Chargement des fichiers Prolog nécessaires
+<span class="nc" id="L54">        loadResource(&quot;/RGPD/causal_dependencies.pl&quot;);</span>
+<span class="nc" id="L55">        loadTimeTerms();</span>
+<span class="nc" id="L56">        loadPrologFile(this.provenanceGraphPath);</span>
+
+        // Utilisation d'un StringBuilder pour un code plus propre
+<span class="nc" id="L59">        StringBuilder resultBuilder = new StringBuilder();</span>
+
+        // On réinitialise le compteur d'ID statique de la classe Issue
+        // Issue.resetCounter(); // Vous pourriez ajouter une méthode statique pour cela dans Issue
+
+<span class="nc bnc" id="L64" title="All 2 branches missed.">        for (String principleName : principles) {</span>
+<span class="nc" id="L65">            Issue.IssueType issueType = Issue.IssueType.fromString(principleName);</span>
+<span class="nc" id="L66">            String prologQuery = getPrologQueryForPrinciple(issueType);</span>
+
+            // --- CORRECTION ICI ---
+            // On mappe le nom du type d'issue au nom de fichier réel.
+<span class="nc bnc" id="L70" title="All 5 branches missed.">            String fileName = switch (issueType) {</span>
+<span class="nc" id="L71">                case RIGHT_TO_ERASURE -&gt; &quot;erase_compliant.pl&quot;;</span>
+<span class="nc" id="L72">                case RIGHT_TO_ACCESS -&gt; &quot;right_access.pl&quot;;</span>
+<span class="nc" id="L73">                case STORAGE_LIMITATION -&gt; &quot;storage_limitation.pl&quot;;</span>
+<span class="nc" id="L74">                case LEGAL -&gt; &quot;legal.pl&quot;;</span>
+<span class="nc" id="L75">                default -&gt; &quot;&quot;;</span>
+            };
+
+<span class="nc bnc" id="L78" title="All 2 branches missed.">            if (!fileName.isEmpty()) {</span>
+                try {
+<span class="nc" id="L80">                    loadResource(&quot;/RGPD/&quot; + fileName);</span>
+<span class="nc" id="L81">                } catch (IOException e) {</span>
+<span class="nc" id="L82">                    System.err.println(&quot;Warning: Could not load rule file: &quot; + fileName);</span>
+<span class="nc" id="L83">                    continue; // On passe au principe suivant si le fichier n'est pas trouvé</span>
+<span class="nc" id="L84">                }</span>
+            }
+            // --- CHANGEMENT : LE BLOC DE DÉBOGAGE EST MAINTENANT SANS CONDITION ---
+<span class="nc" id="L87">            System.out.println(&quot;====================================================================&quot;);</span>
+<span class="nc" id="L88">            System.out.println(&quot;&gt;&gt;&gt; ACTIVATION DU TRACEUR PROLOG pour le principe : &quot; + issueType.name());</span>
+<span class="nc" id="L89">            System.out.println(&quot;====================================================================&quot;);</span>
+<span class="nc" id="L90">            new Query(&quot;leash(-all)&quot;).hasSolution();</span>
+<span class="nc" id="L91">            new Query(&quot;trace&quot;).hasSolution();</span>
+            try {
+<span class="nc" id="L93">                Query q = new Query(prologQuery);</span>
+<span class="nc bnc" id="L94" title="All 2 branches missed.">                if (q.hasSolution()) {</span>
+<span class="nc" id="L95">                    HashMap&lt;String, Term&gt;[] solutions = (HashMap&lt;String, Term&gt;[]) q.allSolutions();</span>
+<span class="nc bnc" id="L96" title="All 2 branches missed.">                    for (HashMap&lt;String, Term&gt; sol : solutions) {</span>
+                        // CHANGEMENT : On utilise le constructeur Prolog de la nouvelle classe Issue
+<span class="nc" id="L98">                        Issue issue = new Issue(issueType.typeName, sol);</span>
+<span class="nc" id="L99">                        this.issues.add(issue);</span>
+<span class="nc" id="L100">                        resultBuilder.append(issue.toString());</span>
+                    }
+                }
+<span class="nc" id="L103">            } catch (PrologException e) {</span>
+<span class="nc" id="L104">                System.err.println(&quot;Prolog error during query for principle '&quot; + principleName + &quot;': &quot; + e.getMessage());</span>
+<span class="nc" id="L105">            }</span>
+<span class="nc" id="L106">        }</span>
+
+<span class="nc" id="L108">        resetSolver(); // Nettoyage de l'environnement Prolog</span>
+
+<span class="nc" id="L110">        String finalResult = resultBuilder.toString();</span>
+<span class="nc bnc" id="L111" title="All 2 branches missed.">        return finalResult.isEmpty() ? &quot;System is compliant.&quot; : finalResult;</span>
+    }
+
+    // --- AUTRES MÉTHODES PUBLIQUES DE L'INTERFACE ---
+    @Override
+    public List&lt;Issue&gt; getIssues() {
+<span class="nc" id="L117">        return issues;</span>
+    }
+
+    // --- MÉTHODES UTILITAIRES PRIVÉES ---
+
+    private String getPrologQueryForPrinciple(Issue.IssueType type) {
+<span class="nc bnc" id="L123" title="All 5 branches missed.">        return switch (type) {</span>
+<span class="nc" id="L124">            case LEGAL -&gt; &quot;legal(P, D, PU, T, DP, C).&quot;;</span>
+<span class="nc" id="L125">            case RIGHT_TO_ERASURE -&gt; &quot;eraseCompliant(D, T, P).&quot;;</span>
+<span class="nc" id="L126">            case RIGHT_TO_ACCESS -&gt; &quot;rightAccess(S, TE).&quot;;</span>
+<span class="nc" id="L127">            case STORAGE_LIMITATION -&gt; &quot;storageLimitation(D, TU).&quot;;</span>
+<span class="nc" id="L128">            default -&gt; &quot;true.&quot;;</span>
+        };
+    }
+
+    // --- VOS MÉTHODES PROLOG UTILS EXISTANTES (INCHANGÉES) ---
+    void loadTermsFromList(List&lt;Term&gt; terms){
+<span class="nc bnc" id="L134" title="All 2 branches missed.">        for (Term t : terms){</span>
+<span class="nc" id="L135">            Term assertTerm = Term.textToTerm(&quot;assertz(&quot; + t.toString() + &quot;)&quot;);</span>
+<span class="nc" id="L136">            Query q = new Query(assertTerm);</span>
+<span class="nc" id="L137">            q.hasSolution();</span>
+<span class="nc" id="L138">            predicatesLoad.add(t.name() + &quot;/&quot; + t.arity());</span>
+<span class="nc" id="L139">        }</span>
+<span class="nc" id="L140">    }</span>
+
+    void unloadAllPredicates(){
+<span class="nc bnc" id="L143" title="All 2 branches missed.">        for (String predicate : predicatesLoad){</span>
+<span class="nc" id="L144">            Query q = new Query(&quot;abolish(&quot; + predicate + &quot;)&quot;);</span>
+<span class="nc" id="L145">            q.hasSolution();</span>
+<span class="nc" id="L146">        }</span>
+<span class="nc" id="L147">        predicatesLoad.clear();</span>
+<span class="nc" id="L148">    }</span>
+
+    void loadPrologFile(String path) throws IOException{
+<span class="nc" id="L151">        Query pred = new Query(&quot;consult&quot;, new Term[] {new Atom(path)});</span>
+<span class="nc bnc" id="L152" title="All 2 branches missed.">        if (!pred.hasSolution()){ throw new IOException(&quot;error opening &quot; + path); }</span>
+<span class="nc" id="L153">        else{ filesLoad.add(path); }</span>
+<span class="nc" id="L154">    }</span>
+
+    void loadResource(String resource) throws IOException {
+<span class="nc" id="L157">        String resourceDirs = &quot;.&quot; + resource.substring(0,resource.lastIndexOf(&quot;/&quot;));</span>
+<span class="nc" id="L158">        new File(resourceDirs).mkdirs();</span>
+<span class="nc" id="L159">        File resourceFile = new File(&quot;.&quot; +resource+&quot;-copy&quot;);</span>
+<span class="nc bnc" id="L160" title="All 2 branches missed.">        if(!resourceFile.exists()) resourceFile.createNewFile();</span>
+<span class="nc" id="L161">        InputStream resourceStream = getClass().getResourceAsStream(resource);</span>
+<span class="nc bnc" id="L162" title="All 2 branches missed.">        if (resourceStream == null) throw new IOException(&quot;Resource not found: &quot; + resource);</span>
+<span class="nc" id="L163">        try (OutputStream out = new FileOutputStream(resourceFile.getPath())) {</span>
+<span class="nc" id="L164">            IOUtils.copy(resourceStream, out);</span>
+        }
+<span class="nc" id="L166">        String path = resourceFile.getPath();</span>
+<span class="nc" id="L167">        Query pred = new Query(&quot;consult&quot;, new Term[] {new Atom(path)});</span>
+<span class="nc bnc" id="L168" title="All 2 branches missed.">        if (!pred.hasSolution()){ throw new IOException(&quot;error opening &quot; + path); }</span>
+<span class="nc" id="L169">        else{ filesLoad.add(path); }</span>
+<span class="nc" id="L170">    }</span>
+
+    void unloadAllFiles() throws RuntimeException {
+<span class="nc bnc" id="L173" title="All 2 branches missed.">        for (String path : filesLoad){</span>
+<span class="nc" id="L174">            Query pred = new Query(&quot;unload_file&quot;, new Term[] {new Atom(path)});</span>
+<span class="nc bnc" id="L175" title="All 2 branches missed.">            if (!pred.hasSolution()){</span>
+                // Ne pas lancer d'exception si le fichier est déjà déchargé, c'est moins strict
+                // throw new RuntimeException(&quot;error closing &quot; + path);
+            }
+<span class="nc" id="L179">        }</span>
+<span class="nc" id="L180">        filesLoad.clear();</span>
+<span class="nc" id="L181">    }</span>
+
+    void resetSolver(){
+        // unloadAllPredicates(); // 'abolish' peut être problématique, le déchargement de fichier est souvent suffisant
+<span class="nc" id="L185">        unloadAllFiles();</span>
+<span class="nc" id="L186">    }</span>
+
+    void loadTimeTerms() throws IOException {
+<span class="nc" id="L189">        loadPrologFile(timeDataPath);</span>
+<span class="nc" id="L190">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.12.202403310830</span></div></body></html>

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="fr"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SolveController.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ter</a> &gt; <a href="index.source.html" class="el_package">Interface.ter</a> &gt; <span class="el_source">SolveController.java</span></div><h1>SolveController.java</h1><pre class="source lang-java linenums">package Interface.ter;
+
+import Traducteur.Converter;
+import Solver.SolverInterface; // CHANGEMENT : On importe l'interface
+import java.io.IOException;
+import java.util.List;
+
+<span class="nc" id="L8">public class SolveController {</span>
+    // Le converter sera toujours utile pour transformer les choix de l'UI en une liste de principes
+    private Converter converter;
+
+    // CHANGEMENT : Le contrôleur ne connaît plus &quot;Solver&quot;, mais seulement le contrat &quot;SolverInterface&quot;
+    private SolverInterface solver;
+
+    public void setConverter(Converter converter) {
+<span class="nc" id="L16">        this.converter = converter;</span>
+<span class="nc" id="L17">    }</span>
+
+    // CHANGEMENT : Le setter accepte n'importe quel objet qui implémente SolverInterface
+    public void setSolver(SolverInterface solver) {
+<span class="nc" id="L21">        this.solver = solver;</span>
+<span class="nc" id="L22">    }</span>
+
+    // CHANGEMENT : Le getter retourne l'interface
+    public SolverInterface getSolver() {
+<span class="nc" id="L26">        return solver;</span>
+    }
+
+    /**
+     * Cette méthode est maintenant beaucoup plus simple. Elle délègue tout le travail
+     * au solveur qui lui a été assigné (soit Prolog, soit Cypher).
+     */
+    public String solve() throws IOException {
+        // On récupère les informations de base depuis le converter
+<span class="nc" id="L35">        String graphPath = converter.getCheminGraphe();</span>
+<span class="nc" id="L36">        List&lt;String&gt; principles = converter.getPrincipes(); // Vous aurez besoin d'une méthode getPrincipes() dans Converter</span>
+<span class="nc" id="L37">        String timePath = &quot;...&quot;; // Ce chemin devra être récupéré depuis le ScreenController</span>
+
+<span class="nc" id="L39">        final long t_start = System.nanoTime();</span>
+
+        // On appelle la méthode &quot;solve&quot; de l'interface, sans se soucier de l'implémentation
+<span class="nc" id="L42">        String sol = solver.solve(principles, graphPath, timePath);</span>
+
+<span class="nc" id="L44">        System.out.println(&quot;Solving time (&quot; + solver.getClass().getSimpleName() + &quot;): &quot; + ((System.nanoTime() - t_start) / 1_000_000) + &quot; ms.&quot;);</span>
+<span class="nc" id="L45">        return sol;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.12.202403310830</span></div></body></html>

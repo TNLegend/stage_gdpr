@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="fr"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SolverCypher.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ter</a> &gt; <a href="index.source.html" class="el_package">Solver</a> &gt; <span class="el_source">SolverCypher.java</span></div><h1>SolverCypher.java</h1><pre class="source lang-java linenums">package Solver;
+
+import GraphDB.Neo4jInterface;
+import org.neo4j.driver.Result;
+import org.neo4j.driver.SessionConfig;
+
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.*;
+
+public class SolverCypher implements SolverInterface {
+
+    private final Neo4jInterface neo;
+<span class="fc" id="L15">    private List&lt;Issue&gt; issues = new ArrayList&lt;&gt;();</span>
+
+    // --- NOS 4 REQUÊTES CYPHER FINALES ET VALIDÉES ---
+
+    /*  ERASE_QUERY_FAST  – O( nb(askErase) × petits sous-ensembles ) */
+    private static final String ERASE_QUERY = &quot;&quot;&quot;
+MATCH (p_ask:Process {action:'askErase'})-[u_ask:used]-&gt;(d:Artifact)
+WHERE $currentTime - u_ask.TU &gt;= $erasureLimitDuration          // fenêtre écoulée
+
+AND NOT EXISTS {
+      MATCH (d)&lt;-[u_del:used]-(:Process {action:'delete'})
+      WHERE u_del.TU &gt;= u_ask.TU                                // après la demande
+        AND u_del.TU  &lt; u_ask.TU + $erasureLimitDuration        // avant la deadline
+}
+RETURN DISTINCT d.name AS D,
+                u_ask.TU AS T,
+                p_ask.name AS P
+&quot;&quot;&quot;;
+    private static final String ACCESS_QUERY = &quot;&quot;&quot;
+// ---------------- ACCESS_QUERY (optimisée &amp; équivalente) ----------------
+MATCH (pAsk:Process {action:'askDataAccess'})
+      -[wcbAsk:wasControlledBy {ctx:'owner'}]-&gt;(subject:Agent)
+WITH pAsk, subject, wcbAsk.TE AS tReq
+WHERE $currentTime - tReq &gt;= $accessLimitDuration           // délai écoulé
+
+// artefact-requête généré exactement à tReq
+MATCH (req:Artifact)-[wgb:wasGeneratedBy]-&gt;(pAsk)
+WHERE wgb.TG = tReq                                         // jointure ferme
+  AND NOT EXISTS {                                          // aucun envoi valable
+        MATCH (pSend:Process {action:'sendData'})
+              -[uSend:used]-&gt;(req)                          // même artefact
+        WHERE uSend.TU  &gt;  tReq
+          AND uSend.TU  -  tReq &lt; $accessLimitDuration      // dans la fenêtre
+      }
+
+RETURN DISTINCT subject.name AS S ,
+                tReq              AS TE
+
+&quot;&quot;&quot;;
+
+    private static final String CONSENT_QUERY = &quot;&quot;&quot;
+/* ─────────────────────────────────────────────────────────────────────────────
+   AVANT la première exécution, créez les index une seule fois :
+
+   CREATE INDEX idx_proc_action       IF NOT EXISTS FOR (p:Process)  ON (p.action);
+   CREATE INDEX idx_art_type          IF NOT EXISTS FOR (a:Artifact) ON (a.type);
+   CREATE INDEX idx_art_cons_type     IF NOT EXISTS FOR (a:Artifact) ON (a.consent_type);
+   CREATE INDEX idx_wgb_TG            IF NOT EXISTS FOR ()-[r:wasGeneratedBy]-() ON (r.TG);
+   CREATE INDEX idx_used_TU           IF NOT EXISTS FOR ()-[r:used]-()           ON (r.TU);
+            
+   ───────────────────────────────────────────────────────────────────────────── */
+/* =====================================================================
+   CONSENT_QUERY  
+   ===================================================================== */
+MATCH (p_use:Process)-[u:used]-&gt;(d_used:Artifact)
+WHERE NOT p_use.action IN $defaultPurposesList          // 1) action non triviale
+
+/* ── 2) remonter jusqu’à UNE racine de donnée personnelle ───────────── */
+CALL {
+  WITH d_used
+  MATCH (d_used)-[:wasGeneratedBy|used|wasDerivedFrom*0..]-
+        (root:Artifact {type:'personal_data'})          // ← liaison non orientée
+  RETURN root LIMIT 1                                           // 1ʳᵉ racine suffit
+  
+}
+
+/* ── 3) consentement valable le plus récent avant l’usage ───────────── */
+WITH p_use, u.TU AS TU_use, p_use.action AS PU,
+     d_used, root
+OPTIONAL MATCH (c:Artifact {consent_type:'purposes_consent'})
+      -[wgb:wasGeneratedBy]-&gt;(:Process)
+WHERE wgb.TG &lt; TU_use
+  AND PU IN c[root.name + '_purposes']
+
+  // pas de révocation couvrant l’intervalle
+  AND NOT EXISTS {
+        MATCH (:Process)-[u_rev:used {ctx:'revokeConsent'}]-&gt;(c)
+        WHERE u_rev.TU &gt;= wgb.TG AND u_rev.TU &lt; TU_use
+      }
+
+WITH p_use, TU_use, PU, d_used,
+     c ORDER BY wgb.TG DESC
+WITH p_use, TU_use, PU, d_used,
+     collect(c)[0] AS c_latest            // le consentement le + récent
+
+/* ── 4) signaler les usages sans consentement ───────────────────────── */
+WHERE c_latest IS NULL
+RETURN DISTINCT
+       p_use.name  AS P,
+       d_used.name AS D,
+       PU          AS PU,
+       TU_use      AS T
+ORDER BY T;
+
+&quot;&quot;&quot;;
+
+    private static final String STORAGE_QUERY = &quot;&quot;&quot;
+/* =====================================================================
+   STORAGE_QUERY — équivalent à storageLimitation(D,TU) en Prolog
+   ---------------------------------------------------------------------
+   Hypothèses d’index déjà créés manuellement :
+     CREATE INDEX idx_proc_action       IF NOT EXISTS FOR (p:Process)  ON (p.action);
+     CREATE INDEX idx_art_type          IF NOT EXISTS FOR (a:Artifact) ON (a.type);
+   ===================================================================== */
+MATCH (art:Artifact)&lt;-[u:used]-(p:Process)
+
+/* ── une seule agrégation balaye TOUTES les utilisations de l’artefact ── */
+WITH art,
+     max( CASE WHEN p.action &lt;&gt; 'delete' THEN u.TU END ) AS last_use,   // dernier usage « normal »
+     max( CASE WHEN p.action  = 'delete' THEN u.TU END ) AS last_del    // dernier delete éventuel
+
+/* ── 1) délai de conservation dépassé ────────────────────────────────── */
+WHERE last_use IS NOT NULL
+  AND $currentTime - last_use &gt;= $storageLimitDuration
+
+/* ── 2) pas de suppression effectuée à temps ─────────────────────────── */
+  AND ( last_del IS NULL                // jamais supprimé
+        OR last_del - last_use &gt;= $storageLimitDuration )
+
+/* ── 3) l’artefact (ou un ancêtre) est une donnée personnelle ─────────── */
+  AND EXISTS {
+        MATCH (art)-[:wasGeneratedBy|used|wasDerivedFrom*0..]-&gt;
+              (:Artifact)-[wgb:wasGeneratedBy]-&gt;(:Process)
+        WHERE wgb.ctx = 'personal data'
+        RETURN 1 LIMIT 1                        // stoppe l’expansion dès qu’un ancêtre perso est trouvé
+  }
+
+/* ── 4) signal de non-conformité ─────────────────────────────────────── */
+RETURN DISTINCT art.name AS D, last_use AS TU
+ORDER BY TU;
+
+&quot;&quot;&quot;;
+
+<span class="fc" id="L148">    public SolverCypher(Neo4jInterface neo) {</span>
+<span class="fc" id="L149">        this.neo = neo;</span>
+<span class="fc" id="L150">    }</span>
+
+    @Override
+    public String solve(List&lt;String&gt; principles, String provenanceGraphPath, String timeDataPath) throws IOException {
+<span class="fc" id="L154">        this.issues.clear();</span>
+
+        // 1. Charger les faits Prolog dans la base de données Neo4j
+        //neo.retrieveGraphDB(provenanceGraphPath);
+
+        // 2. Lire les paramètres de temps
+<span class="fc" id="L160">        Map&lt;String, Object&gt; timeParams = parseTimeFile(timeDataPath);</span>
+<span class="fc" id="L161">        timeParams.put(&quot;defaultPurposesList&quot;, List.of(&quot;consent&quot;, &quot;delete&quot;, &quot;askErase&quot;, &quot;sendData&quot;, &quot;askDataAccess&quot;, &quot;updateConsent&quot;, &quot;accessWebPage&quot;, &quot;updateData&quot;, &quot;createAccount&quot;, &quot;login&quot;));</span>
+
+        // 3. Exécuter les requêtes
+<span class="fc" id="L164">        try (var session = neo.getDriver().session(SessionConfig.forDatabase(&quot;neo4j&quot;))) {</span>
+
+<span class="fc bfc" id="L166" title="All 2 branches covered.">            for (String principleName : principles) {</span>
+
+<span class="fc" id="L168">                Issue.IssueType issueType = Issue.IssueType.fromString(principleName);</span>
+<span class="fc" id="L169">                String query = getCypherQueryForPrinciple(issueType);</span>
+<span class="pc bpc" id="L170" title="1 of 2 branches missed.">                if (query == null) continue;</span>
+
+                /* ⬇️  UTILISER le même session, pas neo.executeQuery() */
+<span class="fc" id="L173">                List&lt;org.neo4j.driver.Record&gt; records =</span>
+<span class="fc" id="L174">                        session.executeRead(tx -&gt; neo.runReadQuery(tx, query, timeParams));</span>
+
+<span class="fc bfc" id="L176" title="All 2 branches covered.">                for (org.neo4j.driver.Record rec : records) {</span>
+<span class="fc" id="L177">                    issues.add(new Issue(issueType, rec));</span>
+<span class="fc" id="L178">                }</span>
+<span class="fc" id="L179">            }</span>
+        }
+
+        // 4. Formatter le résultat final
+<span class="fc bfc" id="L183" title="All 2 branches covered.">        if (issues.isEmpty()) {</span>
+<span class="fc" id="L184">            return &quot;System is compliant.&quot;;</span>
+        } else {
+<span class="fc" id="L186">            StringBuilder sb = new StringBuilder();</span>
+<span class="fc" id="L187">            issues.forEach(issue -&gt; sb.append(issue.toString()));</span>
+<span class="fc" id="L188">            return sb.toString();</span>
+        }
+    }
+
+    @Override
+    public List&lt;Issue&gt; getIssues() {
+<span class="fc" id="L194">        return Collections.unmodifiableList(this.issues);</span>
+    }
+
+    private String getCypherQueryForPrinciple(Issue.IssueType type) {
+<span class="pc bpc" id="L198" title="1 of 5 branches missed.">        return switch (type) {</span>
+<span class="fc" id="L199">            case RIGHT_TO_ERASURE -&gt; ERASE_QUERY;</span>
+<span class="fc" id="L200">            case RIGHT_TO_ACCESS -&gt; ACCESS_QUERY;</span>
+<span class="fc" id="L201">            case LEGAL -&gt; CONSENT_QUERY;</span>
+<span class="fc" id="L202">            case STORAGE_LIMITATION -&gt; STORAGE_QUERY;</span>
+<span class="nc" id="L203">            default -&gt; null;</span>
+        };
+    }
+
+    private Map&lt;String, Object&gt; parseTimeFile(String path) throws IOException {
+<span class="fc" id="L208">        Map&lt;String, Object&gt; params = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L209">        try (BufferedReader br = new BufferedReader(new FileReader(path))) {</span>
+            String line;
+<span class="fc bfc" id="L211" title="All 2 branches covered.">            while ((line = br.readLine()) != null) {</span>
+<span class="fc bfc" id="L212" title="All 2 branches covered.">                if (line.startsWith(&quot;tCurrent&quot;)) {</span>
+<span class="fc" id="L213">                    params.put(&quot;currentTime&quot;, Integer.parseInt(extractValue(line)));</span>
+<span class="fc bfc" id="L214" title="All 2 branches covered.">                } else if (line.startsWith(&quot;tLimit('access'&quot;)) {</span>
+<span class="fc" id="L215">                    params.put(&quot;accessLimitDuration&quot;, Integer.parseInt(extractValue(line)));</span>
+<span class="fc bfc" id="L216" title="All 2 branches covered.">                } else if (line.startsWith(&quot;tLimit('erase'&quot;)) {</span>
+<span class="fc" id="L217">                    params.put(&quot;erasureLimitDuration&quot;, Integer.parseInt(extractValue(line)));</span>
+<span class="pc bpc" id="L218" title="1 of 2 branches missed.">                } else if (line.startsWith(&quot;tLimit('storage'&quot;)) {</span>
+<span class="fc" id="L219">                    params.put(&quot;storageLimitDuration&quot;, Integer.parseInt(extractValue(line)));</span>
+                }
+            }
+        }
+<span class="fc" id="L223">        return params;</span>
+    }
+
+
+    private String extractValue(String line) {
+        // This regex pattern looks for digits inside the last pair of parentheses
+        // It's designed to work for both &quot;tCurrent(5000)&quot; and &quot;tLimit('access',1000)&quot;
+<span class="fc" id="L230">        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(&quot;\\((\\d+)\\)|,\\s*(\\d+)\\)&quot;);</span>
+<span class="fc" id="L231">        java.util.regex.Matcher matcher = pattern.matcher(line);</span>
+
+<span class="fc" id="L233">        String value = null;</span>
+<span class="fc bfc" id="L234" title="All 2 branches covered.">        while (matcher.find()) {</span>
+<span class="fc bfc" id="L235" title="All 2 branches covered.">            if (matcher.group(1) != null) { // For &quot;tCurrent(5000)&quot; format</span>
+<span class="fc" id="L236">                value = matcher.group(1);</span>
+<span class="pc bpc" id="L237" title="1 of 2 branches missed.">            } else if (matcher.group(2) != null) { // For &quot;tLimit('access',1000)&quot; format</span>
+<span class="fc" id="L238">                value = matcher.group(2);</span>
+            }
+        }
+
+<span class="pc bpc" id="L242" title="1 of 2 branches missed.">        if (value != null) {</span>
+<span class="fc" id="L243">            return value;</span>
+        } else {
+            // Handle cases where the value cannot be extracted (e.g., malformed lines)
+<span class="nc" id="L246">            throw new IllegalArgumentException(&quot;Could not extract numerical value from line: &quot; + line);</span>
+        }
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.12.202403310830</span></div></body></html>
