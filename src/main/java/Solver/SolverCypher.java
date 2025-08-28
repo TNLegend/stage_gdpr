@@ -30,127 +30,167 @@ RETURN DISTINCT d.name AS D,
                 u_ask.TU AS T,
                 p_ask.name AS P
 """;
+
     private static final String ACCESS_QUERY = """
-// ---------------- ACCESS_QUERY (optimisée & équivalente) ----------------
+// Parameters expected: $currentTime, $accessLimitDuration
 MATCH (pAsk:Process {action:'askDataAccess'})
-      -[wcbAsk:wasControlledBy {ctx:'owner'}]->(subject:Agent)
-WITH pAsk, subject, wcbAsk.TE AS tReq
-WHERE $currentTime - tReq >= $accessLimitDuration           // délai écoulé
+      -[wcbAsk:wasControlledBy {ctx:'owner'}]->(subj:Agent)
+WITH pAsk,
+     subj,
+     wcbAsk.TB AS tAskStart,
+     wcbAsk.TE AS tReq
+WHERE $currentTime - tReq >= $accessLimitDuration     // window closed
 
-// artefact-requête généré exactement à tReq
+/* ── request artefacts ───────────────────────────── */
 MATCH (req:Artifact)-[wgb:wasGeneratedBy]->(pAsk)
-WHERE wgb.TG = tReq                                         // jointure ferme
-  AND NOT EXISTS {                                          // aucun envoi valable
-        MATCH (pSend:Process {action:'sendData'})
-              -[uSend:used]->(req)                          // même artefact
-        WHERE uSend.TU  >  tReq
-          AND uSend.TU  -  tReq < $accessLimitDuration      // dans la fenêtre
-      }
+WHERE wgb.TG >= tAskStart AND wgb.TG <= tReq
+WITH subj, tReq, collect(DISTINCT req) AS reqs
+WHERE size(reqs) > 0                                   // just in case
 
-RETURN DISTINCT subject.name AS S ,
-                tReq              AS TE
+/* ── search for the *earliest* on-time reply (if any) */
+CALL {
+  WITH subj, reqs
+  OPTIONAL MATCH (pSend:Process {action:'sendData'})
+                -[:wasControlledBy {ctx:'owner'}]->(subj)
+  OPTIONAL MATCH (pSend)-[:used]->(reqUsed:Artifact)
+  WHERE reqUsed IS NULL OR reqUsed IN reqs
+  OPTIONAL MATCH (resp:Artifact)-[wgbSend:wasGeneratedBy {ctx:'sendData'}]->(pSend)
+  RETURN min(wgbSend.TG) AS firstReplyTE
+}
+
+/* ── flag violation ──────────────────────────────── */
+WITH subj, tReq, firstReplyTE
+WHERE firstReplyTE IS NULL
+   OR firstReplyTE - tReq >= $accessLimitDuration
+RETURN subj.name AS S, tReq AS TE
+ORDER BY S, TE;
 
 """;
 
     private static final String CONSENT_QUERY = """
-/* ─────────────────────────────────────────────────────────────────────────────
-   AVANT la première exécution, créez les index une seule fois :
+WITH $defaultPurposes AS defaults
 
-   CREATE INDEX idx_proc_action       IF NOT EXISTS FOR (p:Process)  ON (p.action);
-   CREATE INDEX idx_art_type          IF NOT EXISTS FOR (a:Artifact) ON (a.type);
-   CREATE INDEX idx_art_cons_type     IF NOT EXISTS FOR (a:Artifact) ON (a.consent_type);
-   CREATE INDEX idx_wgb_TG            IF NOT EXISTS FOR ()-[r:wasGeneratedBy]-() ON (r.TG);
-   CREATE INDEX idx_used_TU           IF NOT EXISTS FOR ()-[r:used]-()           ON (r.TU);
-            
-   ───────────────────────────────────────────────────────────────────────────── */
-/* =====================================================================
-   CONSENT_QUERY  
-   ===================================================================== */
-MATCH (p_use:Process)-[u:used]->(d_used:Artifact)
-WHERE NOT p_use.action IN $defaultPurposesList          // 1) action non triviale
+// 1) candidate uses (exclude synthetic)
+MATCH (p:Process)-[u:used]->(d:Artifact)
+WHERE p.action IS NOT NULL
+  AND coalesce(p.synthetic,false) = false
+  AND coalesce(u.synthetic,false) = false
 
-/* ── 2) remonter jusqu’à UNE racine de donnée personnelle ───────────── */
+// 2) choose a single personal-data root for d (0.. handles "d is personal" too)
 CALL {
-  WITH d_used
-  MATCH (d_used)-[:wasGeneratedBy|used|wasDerivedFrom*0..]-
-        (root:Artifact {type:'personal_data'})          // ← liaison non orientée
-  RETURN root LIMIT 1                                           // 1ʳᵉ racine suffit
-  
+  WITH d
+  MATCH pth = allShortestPaths( (d)-[:wasDerivedFrom*0..]->(dp:Artifact {type:'personal_data'}) )
+  WITH dp, length(pth) AS L, coalesce(dp.personal_seq, 9223372036854775807) AS seq
+  ORDER BY L ASC, seq ASC
+  LIMIT 1
+  RETURN dp
 }
 
-/* ── 3) consentement valable le plus récent avant l’usage ───────────── */
-WITH p_use, u.TU AS TU_use, p_use.action AS PU,
-     d_used, root
-OPTIONAL MATCH (c:Artifact {consent_type:'purposes_consent'})
-      -[wgb:wasGeneratedBy]->(:Process)
-WHERE wgb.TG < TU_use
-  AND PU IN c[root.name + '_purposes']
+// 2.5) apply default allow-list: GLOBAL + DATA-SPECIFIC
+OPTIONAL MATCH (mc:Artifact {name:'mandatory_consent'})
+WITH p,u,d,dp,defaults, mc, coalesce(dp.dp_key, dp.purposes_key) AS prop
+WITH p,u,d,dp,defaults, mc, prop,
+     CASE WHEN mc IS NULL THEN [] ELSE coalesce(mc[prop], []) END AS dpDefaults
+WITH p,u,d,dp,defaults, mc, dpDefaults,
+     (p.action IN defaults) AS isGloballyAllowed
+WHERE NOT isGloballyAllowed
+ // only global defaults are unconditional
 
-  // pas de révocation couvrant l’intervalle
-  AND NOT EXISTS {
-        MATCH (:Process)-[u_rev:used {ctx:'revokeConsent'}]->(c)
-        WHERE u_rev.TU >= wgb.TG AND u_rev.TU < TU_use
+
+// 3) violation if NO valid consent for (dp, p.action) before u.TU,
+//    respecting revocations and later consents
+WITH p,u,d,dp, coalesce(dp.dp_key, dp.purposes_key) AS prop
+WHERE NOT EXISTS {
+  // a consent artifact c granting p.action for dp
+  MATCH (c:Artifact)-[wg:wasGeneratedBy {ctx:'consent'}]->(pGen:Process)
+  MATCH (pGen)-[:wasControlledBy {ctx:'owner'}]->(:Agent)
+  WHERE wg.TG < u.TU                                       // consent must predate the use
+    AND (
+                  p.action IN coalesce(c[prop], [])
+                  OR p.action IN dpDefaults
+                )
+            
+
+    // validity condition (same as your Prolog logic)
+    AND (
+      // (B) there exists a "next consent" after the use -> then the pre-use consent c is valid window
+      EXISTS {
+        MATCH (p2:Process)-[:used {ctx:'consent'}]->(c)
+        MATCH (:Artifact)-[wg1:wasGeneratedBy {ctx:'consent'}]->(p2)
+        MATCH (p2)-[:wasControlledBy {ctx:'owner'}]->(:Agent)
+        WHERE wg1.TG > u.TU
       }
+      OR
+      // (A) c is the last consent and was not revoked on/before the use time
+      (
+        NOT EXISTS {
+          MATCH (p3:Process)-[:used {ctx:'consent'}]->(c)
+          MATCH (:Artifact)-[:wasGeneratedBy {ctx:'consent'}]->(p3)
+        }
+        AND (
+          NOT EXISTS { MATCH (:Process)-[rv:used {ctx:'revokeConsent'}]->(c) WHERE rv.TU <= u.TU }
+          OR  EXISTS  { MATCH (:Process)-[rv:used {ctx:'revokeConsent'}]->(c) WHERE rv.TU >  u.TU }
+        )
+      )
+    )
+}
 
-WITH p_use, TU_use, PU, d_used,
-     c ORDER BY wgb.TG DESC
-WITH p_use, TU_use, PU, d_used,
-     collect(c)[0] AS c_latest            // le consentement le + récent
-
-/* ── 4) signaler les usages sans consentement ───────────────────────── */
-WHERE c_latest IS NULL
-RETURN DISTINCT
-       p_use.name  AS P,
-       d_used.name AS D,
-       PU          AS PU,
-       TU_use      AS T
+RETURN DISTINCT p.name AS P, d.name AS D, p.action AS PU, u.TU AS T
 ORDER BY T;
 
+
 """;
 
+
+
+
+    // STORAGE — report every violating (d, TU). No var-length, no collect.
     private static final String STORAGE_QUERY = """
-/* =====================================================================
-   STORAGE_QUERY — équivalent à storageLimitation(D,TU) en Prolog
-   ---------------------------------------------------------------------
-   Hypothèses d’index déjà créés manuellement :
-     CREATE INDEX idx_proc_action       IF NOT EXISTS FOR (p:Process)  ON (p.action);
-     CREATE INDEX idx_art_type          IF NOT EXISTS FOR (a:Artifact) ON (a.type);
-   ===================================================================== */
-MATCH (art:Artifact)<-[u:used]-(p:Process)
+WITH ($currentTime - $storageLimitDuration) AS cutoff
 
-/* ── une seule agrégation balaye TOUTES les utilisations de l’artefact ── */
-WITH art,
-     max( CASE WHEN p.action <> 'delete' THEN u.TU END ) AS last_use,   // dernier usage « normal »
-     max( CASE WHEN p.action  = 'delete' THEN u.TU END ) AS last_del    // dernier delete éventuel
+// 1) candidate uses in the expired window
+MATCH (p:Process)-[u:used]->(d:Artifact)
+WHERE p.action <> 'delete'
+  AND u.TU <= cutoff
 
-/* ── 1) délai de conservation dépassé ────────────────────────────────── */
-WHERE last_use IS NOT NULL
-  AND $currentTime - last_use >= $storageLimitDuration
+// 2) pick ONE personal root like Prolog’s once/1
+CALL {
+  WITH d
+  MATCH pth = allShortestPaths( (d)-[:wasDerivedFrom*0..]->(dp:Artifact {type:'personal_data'}) )
+  WITH dp, length(pth) AS L, coalesce(dp.personal_seq, 9223372036854775807) AS seq
+  ORDER BY L ASC, seq ASC
+  LIMIT 1
+  RETURN dp
+}
 
-/* ── 2) pas de suppression effectuée à temps ─────────────────────────── */
-  AND ( last_del IS NULL                // jamais supprimé
-        OR last_del - last_use >= $storageLimitDuration )
+// bring vars back from subquery before filtering
+WITH d, u, dp
 
-/* ── 3) l’artefact (ou un ancêtre) est une donnée personnelle ─────────── */
-  AND EXISTS {
-        MATCH (art)-[:wasGeneratedBy|used|wasDerivedFrom*0..]->
-              (:Artifact)-[wgb:wasGeneratedBy]->(:Process)
-        WHERE wgb.ctx = 'personal data'
-        RETURN 1 LIMIT 1                        // stoppe l’expansion dès qu’un ancêtre perso est trouvé
-  }
+// 3) NOT storageLimitationOk(dp, u.TU)
+WHERE NOT EXISTS {
+  MATCH (:Process {action:'delete'})-[ud:used]->(dp)
+  WHERE  (ud.TU - u.TU) < $storageLimitDuration
+}
 
-/* ── 4) signal de non-conformité ─────────────────────────────────────── */
-RETURN DISTINCT art.name AS D, last_use AS TU
-ORDER BY TU;
+// 4) one row per violating use
+RETURN DISTINCT d.name AS D, u.TU AS TU
+ORDER BY TU
+
 
 """;
+
+
 
     public SolverCypher(Neo4jInterface neo) {
         this.neo = neo;
     }
+    private static final Set<String> printedGraphs =
+            Collections.synchronizedSet(new HashSet<>());
+
 
     @Override
     public String solve(List<String> principles, String provenanceGraphPath, String timeDataPath) throws IOException {
+        Issue.resetCounter(); //remttre le compteur d'issues a 0
         this.issues.clear();
 
         // 1. Charger les faits Prolog dans la base de données Neo4j
@@ -158,10 +198,26 @@ ORDER BY TU;
 
         // 2. Lire les paramètres de temps
         Map<String, Object> timeParams = parseTimeFile(timeDataPath);
-        timeParams.put("defaultPurposesList", List.of("consent", "delete", "askErase", "sendData", "askDataAccess", "updateConsent", "accessWebPage", "updateData", "createAccount", "login"));
 
         // 3. Exécuter les requêtes
         try (var session = neo.getDriver().session(SessionConfig.forDatabase("neo4j"))) {
+
+            List<String> defaultPurposes = session.executeRead(tx -> {
+                var rec = tx.run("""
+        OPTIONAL MATCH (c:Artifact {name:'mandatory_consent'})
+        RETURN CASE WHEN c IS NULL THEN [] ELSE coalesce(c.__purposes, []) END AS list
+    """).single();
+                return rec.get("list").asList(v -> v.asString());
+            });
+
+
+            if (printedGraphs.add(provenanceGraphPath)) {
+                System.out.println("Default purposes from graph: " + defaultPurposes);
+            }
+            timeParams.put("defaultPurposes", defaultPurposes);
+
+
+
 
             for (String principleName : principles) {
 
@@ -205,6 +261,8 @@ ORDER BY TU;
     }
 
     private Map<String, Object> parseTimeFile(String path) throws IOException {
+        System.out.println("[CYPHER-TIME] file=" + path);   // ← which file
+
         Map<String, Object> params = new HashMap<>();
         try (BufferedReader br = new BufferedReader(new FileReader(path))) {
             String line;
@@ -220,8 +278,15 @@ ORDER BY TU;
                 }
             }
         }
+        System.out.println(
+                "[CYPHER-TIME] tCurrent=" + params.get("currentTime")
+                        + " storage=" + params.get("storageLimitDuration")
+                        + " access="  + params.getOrDefault("accessLimitDuration","(none)")
+                        + " erase="   + params.getOrDefault("erasureLimitDuration","(none)")
+        );  // ← what values
         return params;
     }
+
 
 
     private String extractValue(String line) {

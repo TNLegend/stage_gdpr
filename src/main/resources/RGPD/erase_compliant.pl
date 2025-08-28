@@ -1,3 +1,4 @@
+:- style_check(-singleton).
 %	data erasure compliance
 writeNoEraseAsked():- writeln('ERASE REQUEST OK - system compliant for data erasure as no erase was asked').
 % writeEraseNotCompliant(D,T):- write('ERASE REQUEST ISSUE - erase of data '), write(D), write(' was asked at '), write(T), writeln(' but not done in time').

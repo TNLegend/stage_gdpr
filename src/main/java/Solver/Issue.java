@@ -157,6 +157,11 @@ public class Issue {
         return o == null ? "?" : o.toString();
     }
 
+
+    public static void resetCounter() {
+        counter.set(0);
+    }
+
     private static String quoted(Object o) {
         if (o == null) return "null";
         String s = o.toString().trim();
@@ -172,6 +177,6 @@ public class Issue {
             IssueType.LEGAL, "[%d] CONSENT ISSUE – process %s used %s for purpose %s at time %s without consent\n",
             IssueType.RIGHT_TO_ACCESS, "[%d] ACCESS REQUEST ISSUE – subject %s asked for access at time %s and was not sent data in time\n",
             IssueType.RIGHT_TO_ERASURE, "[%d] ERASE REQUEST ISSUE – erase of data %s was asked at %s but not done in time\n",
-            IssueType.STORAGE_LIMITATION, "[%d] STORAGE LIMITATION ISSUE – data %s was last used at %s and not deleted in time\n"
+            IssueType.STORAGE_LIMITATION, "[%d] STORAGE LIMITATION ISSUE – data %s was used at %s and not deleted in time\n"
     );
 }

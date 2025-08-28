@@ -11,6 +11,33 @@ import java.util.HashMap;
 
 public class GraphDBToProlog {
 
+    private static String toPrologList(Object value) {
+        if (value == null) return "[]";
+
+        // Si Neo4j renvoie une vraie liste Java
+        if (value instanceof Iterable<?> it) {
+            StringBuilder sb = new StringBuilder("[");
+            boolean first = true;
+            for (Object o : it) {
+                if (!first) sb.append(", ");
+                sb.append("'").append(String.valueOf(o)).append("'");
+                first = false;
+            }
+            sb.append("]");
+            return sb.toString();
+        }
+
+        // Sinon on part du toString() – gère "[]", "[a, b]" etc.
+        String raw = value.toString().trim();
+        if (raw.equals("[]")) return "[]";
+        // Normalise : [a, b] -> ['a','b']
+        return raw.replace("[", "['")
+                .replace("]", "']")
+                .replace(",", "','")
+                .replace(" ", "");
+    }
+
+
     /**
      * Retrieves the GraphDB provenance graph and writes a corresponding Prolog file (stored in Neo4jInterface.generatedPrologGraphPath)
      * @param driver GraphDB driver
@@ -68,7 +95,10 @@ public class GraphDBToProlog {
                 Value d1 = r.get("d1");
                 Value d2 = r.get("d2");
                 Value w = r.get("w");
-                bw.write(("wasDerivedFrom(" + d2.get("name") + "," + d1.get("name") + "," + w.get("ctx") + "," + w.get("T") + ").\n").replace("\"", "'"));
+                Value tVal = w.get("T");
+                String tStr = (tVal == null || tVal.isNull()) ? "'0'" : tVal.toString(); // default 0 if absent
+                bw.write(("wasDerivedFrom(" + d2.get("name") + "," + d1.get("name") + "," + w.get("ctx") + "," + tStr + ").\n").replace("\"", "'"));
+
             }
 
             // 'used' predicates
@@ -93,61 +123,61 @@ public class GraphDBToProlog {
                 bw.write(("action(" + p.get("name") + "," + p.get("action") + ").\n").replace("\"", "'"));
             }
 
-            // 'purposes' predicates
-            result = driver.executableQuery("MATCH (:Process)<-[:wasGeneratedBy {ctx:'consent'}]-(c:Artifact) RETURN c")
+            // 'purposes' predicates — pour chaque artefact de consentement
+            result = driver.executableQuery(
+                            "MATCH (:Process)<-[:wasGeneratedBy {ctx:'consent'}]-(c:Artifact) RETURN c")
                     .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                     .execute();
 
             for (Record r : result.records()) {
-                StringBuilder line;
                 HashMap<String, Object> consentArtifact = new HashMap<>(r.get("c").asMap());
-                String consent = consentArtifact.get("name").toString();
-                consent = "'" + consent + "'";
 
-                consentArtifact.remove("name");
-                for (String data : consentArtifact.keySet()) {
-                    line = new StringBuilder();
-                    line.append("purposes(").append(consent).append(",");
-                    if (data.equals("_")) {
-                        line.append(data).append(",");
-                    } else {
-                        line.append("'").append(data).append("',");
-                    }
-                    if (consentArtifact.get(data).toString().equals("[]")){
-                        line.append("[]");
-                    } else {
-                        line.append(consentArtifact.get(data).toString().replace("[", "['").replace("]", "']").replace(",", "','").replace(" ", ""));
-                    }
-                    line.append(").\n");
-                    bw.write(line.toString());
+                // Nom du consentement (1er arg de purposes/3)
+                String consent = "'" + consentArtifact.get("name").toString() + "'";
+
+                // On parcourt uniquement les propriétés *_purposes et on ignore les méta
+                for (String key : consentArtifact.keySet()) {
+                    if (key.equals("name") || key.equals("type") || key.equals("category") || key.equals("consent_type"))
+                        continue;
+                    if (!key.endsWith("_purposes")) continue;
+
+                    // Retirer le suffixe "_purposes" pour obtenir le vrai nom de donnée
+                    String data = key.substring(0, key.length() - "_purposes".length());
+
+                    // 2e argument : nom de donnée ; "_" reste sans quotes
+                    String dataArg = data.equals("_") ? "_" : "'" + data + "'";
+
+                    // 3e argument : la liste Prolog normalisée
+                    String list = toPrologList(consentArtifact.get(key));
+
+                    bw.write(String.format("purposes(%s,%s,%s).\n", consent, dataArg, list));
                 }
             }
+
 
             result = driver.executableQuery("MATCH (c:Artifact {name:'mandatory_consent'}) RETURN c")
                     .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                     .execute();
 
-            StringBuilder line;
-            HashMap<String, Object> consentArtifact = new HashMap<>(result.records().get(0).get("c").asMap());
-            String consent = "_";
+            if (!result.records().isEmpty()) {
+                HashMap<String, Object> mandatory = new HashMap<>(result.records().get(0).get("c").asMap());
 
-            consentArtifact.remove("name");
-            for (String data : consentArtifact.keySet()) {
-                line = new StringBuilder();
-                line.append("purposes(").append(consent).append(",");
-                if (data.equals("_")) {
-                    line.append(data).append(",");
-                } else {
-                    line.append("'").append(data).append("',");
+                // consent = "_" (joker) — sans quotes
+                String consentWildcard = "_";
+
+                for (String key : mandatory.keySet()) {
+                    if (key.equals("name") || key.equals("type") || key.equals("category") || key.equals("consent_type"))
+                        continue;
+                    if (!key.endsWith("_purposes")) continue;
+
+                    String data = key.substring(0, key.length() - "_purposes".length());
+                    String dataArg = data.equals("_") ? "_" : "'" + data + "'";
+                    String list = toPrologList(mandatory.get(key));
+
+                    bw.write(String.format("purposes(%s,%s,%s).\n", consentWildcard, dataArg, list));
                 }
-                if (consentArtifact.get(data).toString().equals("[]")){
-                    line.append("[]");
-                } else {
-                    line.append(consentArtifact.get(data).toString().replace("[", "['").replace("]", "']").replace(",", "','").replace(" ", ""));
-                }
-                line.append(").\n");
-                bw.write(line.toString());
             }
+
 
             bw.close();
             fw.close();

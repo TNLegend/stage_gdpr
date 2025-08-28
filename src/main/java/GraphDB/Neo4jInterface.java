@@ -37,50 +37,93 @@ public class Neo4jInterface implements AutoCloseable {
         ensureIndexesAndDebug();
     }
 
+    public long countNodes() {
+        var result = driver.executableQuery("MATCH (n) RETURN count(n) AS c")
+                .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
+                .execute();
+        return result.records().isEmpty() ? 0L : result.records().get(0).get("c").asLong();
+    }
+
+    public long countUsers() {
+        var result = driver.executableQuery("MATCH (:Agent) RETURN count(*) AS c")
+                .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
+                .execute();
+        return result.records().isEmpty() ? 0L : result.records().get(0).get("c").asLong();
+    }
+
+
     private void ensureIndexesAndDebug() {
-        List<String> indexQueries = List.of(
-                "CREATE INDEX idx_proc_action IF NOT EXISTS FOR (p:Process) ON (p.action)",
-                "CREATE INDEX idx_art_type IF NOT EXISTS FOR (a:Artifact) ON (a.type)",
-                "CREATE INDEX idx_art_cons_type IF NOT EXISTS FOR (a:Artifact) ON (a.consent_type)",
-                "CREATE INDEX idx_wgb_TG IF NOT EXISTS FOR ()-[r:wasGeneratedBy]-() ON (r.TG)",
-                "CREATE INDEX idx_used_TU IF NOT EXISTS FOR ()-[r:used]-() ON (r.TU)"
-        );
-
-        System.out.println("--- Starting Index Creation and Debug ---");
-
+        System.out.println("--- Starting Index/Constraint creation ---");
         try (var session = driver.session(SessionConfig.forDatabase("neo4j"))) {
 
-            long nodeCount = session.run("MATCH (n) RETURN count(n) AS count").single().get("count").asLong();
+            long nodeCount = session.run("MATCH (n) RETURN count(n) AS count")
+                    .single().get("count").asLong();
             if (nodeCount > 0) {
-                System.out.println("[WARNING] Attempting to create indexes on a non-empty database with " + nodeCount + " nodes. This may be slow.");
-            } else {
-                System.out.println("[INFO] Database is empty. Index creation should be fast.");
+                System.out.println("[WARNING] Creating indexes on a non-empty DB (" + nodeCount + " nodes).");
             }
 
-            for (String query : indexQueries) {
-                System.out.println("Executing: " + query);
-                long startTime = System.nanoTime();
+            // 0) Drop legacy/mistyped indexes
+            var drops = List.of(
+                    "DROP INDEX idx_art_name IF EXISTS",
+                    "DROP INDEX idx_proc_name IF EXISTS",
+                    "DROP INDEX idx_agent_name IF EXISTS",
+                    "DROP INDEX idx_used_R IF EXISTS",
+                    "DROP INDEX idx_wgb_R IF EXISTS",
+                    "DROP INDEX idx_wcb_R IF EXISTS",
+                    "DROP INDEX idx_used_R_TU IF EXISTS",
+                    "DROP INDEX idx_wgb_R_TG IF EXISTS"
+            );
+            for (String q : drops) session.executeWrite(tx -> { tx.run(q); return null; });
 
-                session.writeTransaction(tx -> {
-                    tx.run(query);
-                    return null;
-                });
+// 1) Unique name constraints
+            var constraints = List.of(
+                    "CREATE CONSTRAINT cons_art_name   IF NOT EXISTS FOR (a:Artifact) REQUIRE a.name IS UNIQUE",
+                    "CREATE CONSTRAINT cons_proc_name  IF NOT EXISTS FOR (p:Process)  REQUIRE p.name IS UNIQUE",
+                    "CREATE CONSTRAINT cons_agent_name IF NOT EXISTS FOR (ag:Agent)   REQUIRE ag.name IS UNIQUE"
+            );
+            for (String q : constraints) session.executeWrite(tx -> { tx.run(q); return null; });
 
-                long durationMs = (System.nanoTime() - startTime) / 1_000_000;
-                System.out.println(" -> Creation command sent in " + durationMs + " ms. Now waiting for it to be online...");
+// 2) Indexes actually used by queries
+            var indexes = List.of(
+                    // Nodes
+                    "CREATE INDEX idx_proc_action       IF NOT EXISTS FOR (p:Process)  ON (p.action)",
+                    "CREATE INDEX idx_art_type          IF NOT EXISTS FOR (a:Artifact) ON (a.type)",
+                    // removed idx_art_name2 (redundant with unique constraint)
+                    "CREATE INDEX idx_art_personal_seq  IF NOT EXISTS FOR (a:Artifact) ON (a.personal_seq)",
+                    "CREATE INDEX idx_art_consent_type  IF NOT EXISTS FOR (a:Artifact) ON (a.consent_type)",
 
-                startTime = System.nanoTime();
-                // ▼▼▼ CORRECTION APPLIQUÉE ICI ▼▼▼
-                session.run("CALL db.awaitIndexes(60000)").consume(); // 60000ms = 60s
-                durationMs = (System.nanoTime() - startTime) / 1_000_000;
-                System.out.println(" -> Index is online. Awaiting took " + durationMs + " ms.");
-            }
-            System.out.println("--- Indexing process finished. ---");
+                    // Relationships (ctx + time)
+                    "CREATE INDEX idx_used_ctx          IF NOT EXISTS FOR ()-[r:used]-()            ON (r.ctx)",
+                    "CREATE INDEX idx_used_TU           IF NOT EXISTS FOR ()-[r:used]-()            ON (r.TU)",
+                    "CREATE INDEX idx_used_ctx_TU       IF NOT EXISTS FOR ()-[r:used]-()            ON (r.ctx, r.TU)",
+
+                    "CREATE INDEX idx_wgb_ctx           IF NOT EXISTS FOR ()-[r:wasGeneratedBy]-()  ON (r.ctx)",
+                    "CREATE INDEX idx_wgb_TG            IF NOT EXISTS FOR ()-[r:wasGeneratedBy]-()  ON (r.TG)",
+                    "CREATE INDEX idx_wgb_ctx_TG        IF NOT EXISTS FOR ()-[r:wasGeneratedBy]-()  ON (r.ctx, r.TG)",
+
+                    "CREATE INDEX idx_wcb_ctx           IF NOT EXISTS FOR ()-[r:wasControlledBy]-() ON (r.ctx)",
+                    "CREATE INDEX idx_wcb_TE            IF NOT EXISTS FOR ()-[r:wasControlledBy]-() ON (r.TE)",
+                    "CREATE INDEX idx_art_dp_key        IF NOT EXISTS FOR (a:Artifact) ON (a.dp_key)",
+                    "CREATE INDEX idx_wdf_T IF NOT EXISTS FOR ()-[r:wasDerivedFrom]-() ON (r.T)"
+
+
+                    // Optional:
+                    //,"CREATE INDEX idx_wcb_ctx_TE        IF NOT EXISTS FOR ()-[r:wasControlledBy]-() ON (r.ctx, r.TE)"
+            );
+            for (String q : indexes) session.executeWrite(tx -> { tx.run(q); return null; });
+
+            session.run("CALL db.awaitIndexes(60000)").consume();
+
+
+
+            System.out.println("--- Index/Constraint creation done ---");
         } catch (Exception e) {
-            System.err.println("[ERROR] Failed during index creation: " + e.getMessage());
-            throw new RuntimeException("Index creation failed", e);
+            System.err.println("[ERROR] During index/constraint creation: " + e.getMessage());
+            throw new RuntimeException(e);
         }
     }
+
+
 
 
     public void retrievePrologPG(){
@@ -100,8 +143,20 @@ public class Neo4jInterface implements AutoCloseable {
             driver.verifyConnectivity();
             System.out.println("Neo4J connection established.");
             PrologToGraphDB.convert(driver, path);
+            System.out.println("Neo4J load complete: " + path);
+        } catch (Exception e) {
+            // unwrap root cause and print it
+            Throwable root = e;
+            while (root.getCause() != null) root = root.getCause();
+            System.err.println("[LOAD-ERROR] " + e.getMessage());
+            System.err.println("[LOAD-ERROR] Root cause: " + root.getClass().getSimpleName()
+                    + " – " + String.valueOf(root.getMessage()));
+            root.printStackTrace();
+            throw new RuntimeException("Failed to load Prolog graph from " + path
+                    + " (cause: " + root.getMessage() + ")", e);
         }
     }
+
     /* ⚙️ nouvelle méthode, lecture seule */
     public List<Record> runReadQuery(TransactionContext tx,
                                      String cypher,
