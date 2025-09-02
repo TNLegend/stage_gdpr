@@ -15,8 +15,33 @@
 
 <script src="https://unpkg.com/neovis.js@2.1.0"></script>
 <script>
-
     let neoViz;
+
+    /* ========= Timestamp → Date helper (same logic as your Java getDate) ========= */
+    // Origin = 2013-12-25 00:00:00.000 (local timezone, like SimpleDateFormat)
+    const ORIGIN_MS = new Date(2013, 11, 25, 0, 0, 0, 0).getTime(); // month is 0-based (11 = December)
+
+    function tsToDateString(ts) {
+        const n = Number(ts);
+        if (!Number.isFinite(n)) return null; // leave as-is if not a number
+        const d = new Date(ORIGIN_MS + n * 1000);
+        const p2 = v => String(v).padStart(2, '0');
+        const p3 = v => String(v).padStart(3, '0');
+        return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}.${p3(d.getMilliseconds())}`;
+    }
+
+    // Keys to humanize as dates (raw timestamp + formatted date in tooltip)
+    const TIME_KEYS = new Set(['T', 'TU', 'TB', 'TE', 'TG']);
+
+    // Build a "key: value (date)" line for tooltips
+    function lineWithDate(key, val) {
+        const vStr = (val == null) ? 'null' : String(val);
+        if (TIME_KEYS.has(key)) {
+            const human = tsToDateString(vStr);
+            if (human) return `${key}: ${vStr} (${human})`;
+        }
+        return `${key}: ${vStr}`;
+    }
 
     function draw (serverUrl, serverUser, serverPassword) {
 
@@ -38,63 +63,61 @@
 
             /* original compact labels ----------------------------------------- */
             labels : {
-  Agent : {
-    label: "name",
-    [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
-      static: {           // <-- propriétés statiques envoyées à Vis.js
-        color: "#FFC300" // Jaune
-      }
-    }
-  },
+              Agent : {
+                label: "name",
+                [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
+                  static: {           // <-- propriétés statiques envoyées à Vis.js
+                    color: "#FFC300" // Jaune
+                  }
+                }
+              },
 
-  Artifact : {
-    label: "name",
-    shape: "circle",
-    [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
-      static: {
-        color: "#F05252" // Rouge
-      }
-    }
-  },
+              Artifact : {
+                label: "name",
+                shape: "circle",
+                [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
+                  static: {
+                    color: "#F05252" // Rouge
+                  }
+                }
+              },
 
-  Process : {
-    label: "name",
-    [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
-      static: {
-        color: "#3375FF" // Bleu
-      }
-    }
-  }
-},
+              Process : {
+                label: "name",
+                [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
+                  static: {
+                    color: "#3375FF" // Bleu
+                  }
+                }
+              }
+            },
 
-           relationships : {
-    wasGeneratedBy  : { },   // ← on enlève label:"ctx"
-    wasControlledBy : { },
-    used            : { },
-    wasTriggeredBy  : { },
-    wasDerivedFrom  : { }
-},
-
+            relationships : {
+              wasGeneratedBy  : { },   // ← on enlève label:"ctx"
+              wasControlledBy : { },
+              used            : { },
+              wasTriggeredBy  : { },
+              wasDerivedFrom  : { }
+            },
 
             initialCypher : "%CYPHER_QUERY%"
         };
 
         /* -------- full-properties tooltip on hover -------- */
-        const fullDetails = item =>
-            Object.entries(item.properties)
-                  .map(([k,v]) => k + ": " + v)
-                  .join('\n');        // “\n” -> new line in vis tooltip
+        const fullDetails = item => {
+            const props = item && item.properties ? item.properties : {};
+            return Object.entries(props)
+                         .map(([k,v]) => lineWithDate(k, v))
+                         .join('\n'); // “\n” -> new line in vis tooltip
+        };
 
         /* attach to every label & relationship */
         Object.values(config.labels).forEach(l => {
-    const adv = l[NeoVis.NEOVIS_ADVANCED_CONFIG]      // ← récupère l’existant
-              ||= {};                                 //   ou crée-le une seule fois
-    adv.function = {                                  // ← on complète
-        title: fullDetails
-    };
-});
+            const adv = (l[NeoVis.NEOVIS_ADVANCED_CONFIG] ||= {});
+            adv.function = { title: fullDetails };
+        });
 
-        // On définit une palette de couleurs
+        // Palette couleurs pour les relations
         const colorMap = {
             "wasGeneratedBy":  "#C70039", // Rouge
             "wasControlledBy": "#3357FF", // Bleu
@@ -104,14 +127,14 @@
         };
 
         Object.values(config.relationships).forEach(r => {
-    r[NeoVis.NEOVIS_ADVANCED_CONFIG] = {
-        function: {
-            label: rel => rel.type,
-            title: fullDetails,
-            color: rel => colorMap[rel.type] || '#848484'
-        }
-    };
-});
+            r[NeoVis.NEOVIS_ADVANCED_CONFIG] = {
+                function: {
+                    label: rel => rel.type,
+                    title: fullDetails,                       // includes timestamp→date lines
+                    color: rel => colorMap[rel.type] || '#848484'
+                }
+            };
+        });
 
         /* render ---------------------------------------------------------------- */
         neoViz = new NeoVis.default(config);
@@ -120,4 +143,3 @@
 </script>
 </body>
 </html>
-
