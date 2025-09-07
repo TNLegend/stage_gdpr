@@ -19,17 +19,26 @@ public class SolverCypher implements SolverInterface {
     /*  ERASE_QUERY_FAST  – O( nb(askErase) × petits sous-ensembles ) */
     private static final String ERASE_QUERY = """
 MATCH (p_ask:Process {action:'askErase'})-[u_ask:used]->(d:Artifact)
-WHERE $currentTime - u_ask.TU >= $erasureLimitDuration          // fenêtre écoulée
+WHERE $currentTime - u_ask.TU >= $erasureLimitDuration
 
-AND NOT EXISTS {
-      MATCH (d)<-[u_del:used]-(:Process {action:'delete'})
-      WHERE u_del.TU >= u_ask.TU                                // après la demande
-        AND u_del.TU  < u_ask.TU + $erasureLimitDuration        // avant la deadline
-}
+AND NOT (
+  EXISTS {
+    MATCH (d)<-[u_del:used]-(:Process {action:'delete'})
+    WHERE u_del.TU >= u_ask.TU
+      AND u_del.TU  <  u_ask.TU + $erasureLimitDuration
+  }
+  OR (
+    d.notAvailableSince IS NOT NULL
+    AND d.notAvailableSince >= u_ask.TU
+    AND d.notAvailableSince <  u_ask.TU + $erasureLimitDuration
+  )
+)
+
 RETURN DISTINCT d.name AS D,
                 u_ask.TU AS T,
                 p_ask.name AS P
 """;
+
 
     private static final String ACCESS_QUERY = """
 // Parameters expected: $currentTime, $accessLimitDuration
@@ -148,12 +157,10 @@ ORDER BY T;
     private static final String STORAGE_QUERY = """
 WITH ($currentTime - $storageLimitDuration) AS cutoff
 
-// 1) candidate uses in the expired window
 MATCH (p:Process)-[u:used]->(d:Artifact)
 WHERE p.action <> 'delete'
   AND u.TU <= cutoff
 
-// 2) pick ONE personal root like Prolog’s once/1
 CALL {
   WITH d
   MATCH pth = allShortestPaths( (d)-[:wasDerivedFrom*0..]->(dp:Artifact {type:'personal_data'}) )
@@ -163,20 +170,20 @@ CALL {
   RETURN dp
 }
 
-// bring vars back from subquery before filtering
 WITH d, u, dp
+WHERE NOT (
+  EXISTS {
+    MATCH (:Process {action:'delete'})-[ud:used]->(dp)
+    WHERE (ud.TU - u.TU) < $storageLimitDuration
+  }
+  OR (
+    dp.notAvailableSince IS NOT NULL
+    AND (dp.notAvailableSince - u.TU) < $storageLimitDuration
+  )
+)
 
-// 3) NOT storageLimitationOk(dp, u.TU)
-WHERE NOT EXISTS {
-  MATCH (:Process {action:'delete'})-[ud:used]->(dp)
-  WHERE  (ud.TU - u.TU) < $storageLimitDuration
-}
-
-// 4) one row per violating use
 RETURN DISTINCT d.name AS D, u.TU AS TU
 ORDER BY TU
-
-
 """;
 
 

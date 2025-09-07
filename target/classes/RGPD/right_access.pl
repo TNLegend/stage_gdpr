@@ -1,49 +1,49 @@
-% === Right‑of‑access compliance rules ===
-% If no access request was made, we consider the system compliant.
+% right access compliance (patched)
+
 writeNoAccessAsked() :-
-    writeln('ACCESS REQUEST OK – system compliant on right‑of‑access as no access was asked').
+    writeln('ACCESS REQUEST OK - system compliant on right access as no access was asked').
 
-% -----------------------------------------------------------------------------
-%  Utility predicates
-% -----------------------------------------------------------------------------
+% Window still open?
+accessTimeLimitNotOver(T) :-
+    tCurrent(TC), tLimit('access', L), TC - T < L.
 
-%  Has the legal time‑limit for sending a copy not yet expired?
-accessTimeLimitNotOver(_Process, RequestTime) :-
-    tCurrent(Current),
-    tLimit('access', Limit),
-    Current - RequestTime < Limit.
+% Request time = TE of askDataAccess (owner)
+request_time(S, P, TE) :-
+    action(P, 'askDataAccess'),
+    wasControlledBy(P, S, 'owner', TB, TE).
 
-%  Was a valid answer sent in time **after** the request?
-rightAccessOk(RequestProcess, Artifact, RequestTime) :-
-    % 1. Deadline not yet over → still ok
-    accessTimeLimitNotOver(RequestProcess, RequestTime),
-    !.
-rightAccessOk(_RequestProcess, Artifact, RequestTime) :-
-    % 2. A "sendData" process used the same request artifact,
-    %    started *after* the request and within the legal window
-    wasControlledBy(SendProc, _Subject, 'owner', _TB2, SendTime),
-    used(SendProc, Artifact, _Role, _TU),
-    action(SendProc, 'sendData'),
-    SendTime  >  RequestTime,
-    tLimit('access', Limit),
-    SendTime - RequestTime < Limit,
-    !.
+% Request artifact generated during [TB,TE] (relaxed)
+request_artifact(P, A) :-
+    wasControlledBy(P, _S, 'owner', TB, TE),
+    wasGeneratedBy(A, P, _R, TG),
+    TG >= TB, TG =< TE.
 
-% -----------------------------------------------------------------------------
-%  Main rule signalling a violation of the right of access
-% -----------------------------------------------------------------------------
+% OK if window still open...
+rightAccessOk(_P, _A, TE) :-
+    accessTimeLimitNotOver(TE), !.
 
-rightAccess(Subject, RequestTime) :-
-    % A request has been made…
-    wasControlledBy(ReqProc, Subject, 'owner', _TB, RequestTime),
-    wasGeneratedBy(Artifact, ReqProc, _Role, RequestTime),
-    action(ReqProc, 'askDataAccess'),
-    % …and no valid answer was found.
-    \+ rightAccessOk(ReqProc, Artifact, RequestTime).
-rightAccess(_Subject, _RequestTime) :-
-    % No request at all → compliant (emit message once, then fail so rule doesn’t succeed)
-    \+ ( wasControlledBy(_P, _S, 'owner', _TB, _T),
-         wasGeneratedBy(_A, _P, _R, _T),
-         action(_P, 'askDataAccess') ),
+% ...or there exists a sendData by the SAME subject that used the request artifact,
+% after the request, and within the legal time window.
+rightAccessOk(_P, A, TE) :-
+    % bind the subject that asked at TE
+    request_time(S, _PAsk, TE),
+    wasControlledBy(P2, S, 'owner', _TB2, TE2),
+    action(P2, 'sendData'),
+    used(P2, A, _R, _TU),
+    TE2 > TE,
+    tLimit('access', L),
+    TE2 - TE < L, !.
+
+% Violation: a request exists (TE), there is a request artifact for it,
+% and no valid on-time reply was found
+rightAccess(S, TE) :-
+    request_time(S, P, TE),
+    request_artifact(P, A),
+    \+ rightAccessOk(P, A, TE).
+
+% No request at all (do NOT require wasGeneratedBy equality)
+rightAccess(_S, _TE) :-
+    \+ ( action(P, 'askDataAccess'),
+         wasControlledBy(P, _S2, 'owner', _TB, _TE2) ),
     writeNoAccessAsked(),
     false.

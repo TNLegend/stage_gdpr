@@ -402,7 +402,13 @@ public class ScreenController {
                 // on charge simplement le graphe et on l'affiche
                 System.out.println("Reloading full graph into Neo4j for visualization...");
                 neo.retrieveGraphDB(this.graph.getAbsolutePath());
-                initGraphVizScreen("MATCH (n)-[r]->(m) RETURN n,r,m"); // On limite pour la performance
+                initGraphVizScreen(
+                        "MATCH (n)-[r]->(m) " +
+                                "WHERE NOT coalesce(n.synthetic,false) " +
+                                "  AND NOT coalesce(m.synthetic,false) " +
+                                "  AND NOT coalesce(r.synthetic,false) " +
+                                "RETURN n,r,m"
+                ); // On limite pour la performance
                 activate("graphVizScreen");
             }
         });

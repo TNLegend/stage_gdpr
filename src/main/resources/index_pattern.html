@@ -31,7 +31,7 @@
     }
 
     // Keys to humanize as dates (raw timestamp + formatted date in tooltip)
-    const TIME_KEYS = new Set(['T', 'TU', 'TB', 'TE', 'TG']);
+    const TIME_KEYS = new Set(['T', 'TU', 'TB', 'TE', 'TG','notAvailableSince']);
 
     // Build a "key: value (date)" line for tooltips
     function lineWithDate(key, val) {
@@ -42,6 +42,7 @@
         }
         return `${key}: ${vStr}`;
     }
+
 
     function draw (serverUrl, serverUser, serverPassword) {
 
@@ -55,49 +56,47 @@
             },
 
             visConfig : {
-                nodes : { shape:"box" },
+                nodes : {
+                    shape:"box",
+                    font: { multi: true } // allow "\n" in labels
+                },
                 edges : {
                     arrows:{ to:{ enabled:true, type:"arrow" } }
                 }
             },
 
-            /* original compact labels ----------------------------------------- */
+           /* original compact labels ----------------------------------------- */
             labels : {
-              Agent : {
-                label: "name",
-                [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
-                  static: {           // <-- propriétés statiques envoyées à Vis.js
-                    color: "#FFC300" // Jaune
-                  }
-                }
-              },
+                "Agent" : {
+                    "label": "name",
+                    "color": "#FFC300" // Jaune
+                },
 
-              Artifact : {
-                label: "name",
-                shape: "circle",
-                [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
-                  static: {
-                    color: "#F05252" // Rouge
-                  }
-                }
-              },
+                  "Artifact": {
+                    shape: "circle",
+                    color: "#C70039",
+                    [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
+                      function: {
+                        label: (n) => {
+                          const name = n?.properties?.name ?? "";
+                          const hasNA = n?.properties?.notAvailableSince != null;
+                          return hasNA ? `${name}\n(✖ not available)` : name;
+                        }
+                      }
+                      }
+                   },
 
-              Process : {
-                label: "name",
-                [NeoVis.NEOVIS_ADVANCED_CONFIG]: {
-                  static: {
-                    color: "#3375FF" // Bleu
-                  }
+                "Process" :  {
+                    "label": "name",
+                    "color": "#3375FF" // Bleu
                 }
-              }
             },
-
             relationships : {
-              wasGeneratedBy  : { },   // ← on enlève label:"ctx"
-              wasControlledBy : { },
-              used            : { },
-              wasTriggeredBy  : { },
-              wasDerivedFrom  : { }
+                wasGeneratedBy  : { },   // ← on enlève label:"ctx"
+                wasControlledBy : { },
+                used            : { },
+                wasTriggeredBy  : { },
+                wasDerivedFrom  : { }
             },
 
             initialCypher : "%CYPHER_QUERY%"
@@ -111,10 +110,11 @@
                          .join('\n'); // “\n” -> new line in vis tooltip
         };
 
-        /* attach to every label & relationship */
+        /* attach to every label & relationship — merge, don’t overwrite */
         Object.values(config.labels).forEach(l => {
             const adv = (l[NeoVis.NEOVIS_ADVANCED_CONFIG] ||= {});
-            adv.function = { title: fullDetails };
+            const fn  = (adv.function ||= {});
+            fn.title  = fullDetails; // keep any existing label() (e.g., artifactLabel)
         });
 
         // Palette couleurs pour les relations

@@ -104,7 +104,9 @@ public class Neo4jInterface implements AutoCloseable {
                     "CREATE INDEX idx_wcb_ctx           IF NOT EXISTS FOR ()-[r:wasControlledBy]-() ON (r.ctx)",
                     "CREATE INDEX idx_wcb_TE            IF NOT EXISTS FOR ()-[r:wasControlledBy]-() ON (r.TE)",
                     "CREATE INDEX idx_art_dp_key        IF NOT EXISTS FOR (a:Artifact) ON (a.dp_key)",
-                    "CREATE INDEX idx_wdf_T IF NOT EXISTS FOR ()-[r:wasDerivedFrom]-() ON (r.T)"
+                    "CREATE INDEX idx_wdf_T IF NOT EXISTS FOR ()-[r:wasDerivedFrom]-() ON (r.T)",
+                    "CREATE INDEX idx_art_not_available IF NOT EXISTS FOR (a:Artifact) ON (a.notAvailableSince)"
+
 
 
                     // Optional:

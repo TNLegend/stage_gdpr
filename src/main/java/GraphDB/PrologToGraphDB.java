@@ -362,31 +362,23 @@ public class PrologToGraphDB {
                             String artifact = p[0];
                             long tu = toLong(p[1]);
 
-                            var r = driver.executableQuery(
-                                            "MATCH (a:Artifact {name:$art})<-[u:used]-(:Process {action:'delete'}) " +
-                                                    "WHERE u.TU = $tu RETURN count(*) AS c")
+                            // ensure the node exists
+                            ensureArtifact(driver, artifact);
+
+                            // set earliest not-available timestamp
+                            driver.executableQuery(
+                                            "MATCH (a:Artifact {name:$art}) " +
+                                                    "SET a.notAvailableSince = CASE " +
+                                                    "  WHEN a.notAvailableSince IS NULL THEN $tu " +
+                                                    "  WHEN a.notAvailableSince > $tu THEN $tu " +
+                                                    "  ELSE a.notAvailableSince END")
                                     .withParameters(db2("art", artifact, "tu", tu))
                                     .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                                     .execute();
-                            long c = r.records().isEmpty() ? 0L : r.records().get(0).get("c").asLong();
 
-                            if (c == 0L) {
-                                String procName = "__implicit_delete__" +
-                                        artifact.replaceAll("[^A-Za-z0-9_]", "_") + "_" + tu;
-
-                                driver.executableQuery(
-                                                "MERGE (a:Artifact {name:$art}) " +
-                                                        "MERGE (p:Process {name:$pname}) " +
-                                                        "  ON CREATE SET p.action = 'delete', p.synthetic = true " +
-                                                        "  ON MATCH  SET p.action = coalesce(p.action, 'delete') " +
-                                                        "MERGE (p)-[u:used {TU:$tu}]->(a) " +
-                                                        "  ON CREATE SET u.synthetic = true")
-                                        .withParameters(db3("art", artifact, "pname", procName, "tu", tu))
-                                        .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
-                                        .execute();
-                            }
                             break;
                         }
+
 
                     }
 
