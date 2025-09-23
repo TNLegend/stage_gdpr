@@ -25,21 +25,22 @@ public class Measurements {
 
     // Use just the principle names; PrologSolver will expand them to canonical goals.
     private static final List<String> PRINCIPLE_NAMES_TO_TEST = List.of(
-           Issue.IssueType.LEGAL.typeName ,              // "legal"
-            Issue.IssueType.RIGHT_TO_ERASURE.typeName,    // "eraseCompliant"
-            Issue.IssueType.RIGHT_TO_ACCESS.typeName ,    // "rightAccess"
+          Issue.IssueType.LEGAL.typeName,               // "legal"
+
+         Issue.IssueType.RIGHT_TO_ERASURE.typeName,    // "eraseCompliant"
+            Issue.IssueType.RIGHT_TO_ACCESS.typeName ,   // "rightAccess"
            Issue.IssueType.STORAGE_LIMITATION.typeName   // "storageLimitation"
     );
 
     // Bench "one by one"
     private static final List<Issue.IssueType> PRINCIPLES = List.of(
           Issue.IssueType.LEGAL,
-            Issue.IssueType.RIGHT_TO_ERASURE,
-           Issue.IssueType.RIGHT_TO_ACCESS,
-            Issue.IssueType.STORAGE_LIMITATION
+        Issue.IssueType.RIGHT_TO_ERASURE,
+         Issue.IssueType.RIGHT_TO_ACCESS,
+          Issue.IssueType.STORAGE_LIMITATION
     );
 
-    private static final int NUMBER_OF_RUNS = 2;
+    private static final int NUMBER_OF_RUNS = 1;
 
     // Files to skip when iterating graphs folder
     private static final List<String> FILES_TO_SKIP_PARAM_PARSING = List.of(

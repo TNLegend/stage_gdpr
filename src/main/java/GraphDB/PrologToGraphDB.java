@@ -221,7 +221,6 @@ public class PrologToGraphDB {
                                     .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                                     .execute();
 
-
                             break;
                         }
 
@@ -280,10 +279,12 @@ public class PrologToGraphDB {
 
                             driver.executableQuery(
                                             "MATCH (p1:Process {name:$p1}), (p2:Process {name:$p2}) " +
-                                                    "CREATE (p1)-[:wasTriggeredBy {ctx:$ctx, T:$t}]->(p2)")
+                                                    "MERGE (p1)-[r:wasTriggeredBy {ctx:$ctx}]->(p2) " +
+                                                    "ON CREATE SET r.T = $t")
                                     .withParameters(Map.of("p1", p1, "p2", p2, "ctx", ctx, "t", t))
                                     .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                                     .execute();
+
                             break;
                         }
 
@@ -297,7 +298,8 @@ public class PrologToGraphDB {
 
                             driver.executableQuery(
                                             "MATCH (a1:Artifact {name:$d1}), (a2:Artifact {name:$d2}) " +
-                                                    "CREATE (a1)-[:wasDerivedFrom {ctx:$ctx, T:$t}]->(a2)")
+                                                    "MERGE (a1)-[r:wasDerivedFrom {ctx:$ctx}]->(a2) " +
+                                                    "ON CREATE SET r.T = $t")
                                     .withParameters(Map.of("d1", d1, "d2", d2, "ctx", ctx, "t", t))
                                     .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                                     .execute();
@@ -346,11 +348,13 @@ public class PrologToGraphDB {
 
                             driver.executableQuery(
                                             "MATCH (c:Artifact {name:$name}) " +
-                                                    "SET c." + prop + " = CASE " +
-                                                    "  WHEN c." + prop + " IS NULL THEN $list " +
-                                                    "  ELSE [x IN (c." + prop + " + $list) WHERE x IS NOT NULL] " +
-                                                    "END, " +
-                                                    "    c.consent_type = 'purposes_consent'")
+                                                    "SET c:" + "Consent" + ", " +          // add a dedicated label
+                                                    "    c." + prop + " = CASE " +
+                                                    "      WHEN c." + prop + " IS NULL THEN $list " +
+                                                    "      ELSE [x IN (c." + prop + " + $list) WHERE x IS NOT NULL] " +
+                                                    "    END, " +
+                                                    "    c.consent_type = 'purposes_consent'"
+                                    )
                                     .withParameters(db2("name", consentName, "list", list))
                                     .withConfig(QueryConfig.builder().withDatabase("neo4j").build())
                                     .execute();
@@ -403,10 +407,33 @@ public class PrologToGraphDB {
             """).withConfig(QueryConfig.builder().withDatabase("neo4j").build()).execute();
 
             /* ---------- personal roots ---------- */
+            // 1) self-link for true personal-data nodes (idempotent)
+            driver.executableQuery(
+                    "MATCH (dp:Artifact {type:'personal_data'}) " +
+                            "MERGE (dp)-[:hasPersonalRoot]->(dp)"
+            ).withConfig(QueryConfig.builder().withDatabase("neo4j").build()).execute();
+
+// 2) pick ONE primary root per artifact
             driver.executableQuery("""
-                MATCH (dp:Artifact {type:'personal_data'})
-                MERGE (dp)-[:hasPersonalRoot]->(dp)
-            """).withConfig(QueryConfig.builder().withDatabase("neo4j").build()).execute();
+  CYPHER runtime=interpreted
+  MATCH (d:Artifact)
+  CALL {
+    WITH d
+    MATCH pth = allShortestPaths(
+      (d)-[:wasDerivedFrom*0..]->(dp:Artifact {type:'personal_data'})
+    )
+    WITH dp,
+         length(pth) AS L,
+         coalesce(dp.personal_seq, 9223372036854775807) AS seq
+    ORDER BY L ASC, seq ASC, dp.name ASC
+    LIMIT 1
+    RETURN dp
+  }
+  MERGE (d)-[:hasPersonalRoot]->(dp)
+""").withConfig(QueryConfig.builder().withDatabase("neo4j").build()).execute();
+
+
+
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to load Prolog graph from " + path, e);

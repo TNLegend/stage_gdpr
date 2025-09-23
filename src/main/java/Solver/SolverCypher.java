@@ -77,77 +77,67 @@ ORDER BY S, TE;
 """;
 
     private static final String CONSENT_QUERY = """
-WITH $defaultPurposes AS defaults
-
-// 1) candidate uses (exclude synthetic)
-MATCH (p:Process)-[u:used]->(d:Artifact)
-WHERE p.action IS NOT NULL
-  AND coalesce(p.synthetic,false) = false
-  AND coalesce(u.synthetic,false) = false
-
-// 2) choose a single personal-data root for d (0.. handles "d is personal" too)
-CALL {
-  WITH d
-  MATCH pth = allShortestPaths( (d)-[:wasDerivedFrom*0..]->(dp:Artifact {type:'personal_data'}) )
-  WITH dp, length(pth) AS L, coalesce(dp.personal_seq, 9223372036854775807) AS seq
-  ORDER BY L ASC, seq ASC
-  LIMIT 1
-  RETURN dp
-}
-
-// 2.5) apply default allow-list: GLOBAL + DATA-SPECIFIC
-OPTIONAL MATCH (mc:Artifact {name:'mandatory_consent'})
-WITH p,u,d,dp,defaults, mc, coalesce(dp.dp_key, dp.purposes_key) AS prop
-WITH p,u,d,dp,defaults, mc, prop,
-     CASE WHEN mc IS NULL THEN [] ELSE coalesce(mc[prop], []) END AS dpDefaults
-WITH p,u,d,dp,defaults, mc, dpDefaults,
-     (p.action IN defaults) AS isGloballyAllowed
-WHERE NOT isGloballyAllowed
- // only global defaults are unconditional
-
-
-// 3) violation if NO valid consent for (dp, p.action) before u.TU,
-//    respecting revocations and later consents
-WITH p,u,d,dp, coalesce(dp.dp_key, dp.purposes_key) AS prop
-WHERE NOT EXISTS {
-  // a consent artifact c granting p.action for dp
-  MATCH (c:Artifact)-[wg:wasGeneratedBy {ctx:'consent'}]->(pGen:Process)
-  MATCH (pGen)-[:wasControlledBy {ctx:'owner'}]->(:Agent)
-  WHERE wg.TG < u.TU                                       // consent must predate the use
-    AND (
-                  p.action IN coalesce(c[prop], [])
-                  OR p.action IN dpDefaults
-                )
+            WITH $defaultPurposes AS defaults
             
-
-    // validity condition (same as your Prolog logic)
-    AND (
-      // (B) there exists a "next consent" after the use -> then the pre-use consent c is valid window
-      EXISTS {
-        MATCH (p2:Process)-[:used {ctx:'consent'}]->(c)
-        MATCH (:Artifact)-[wg1:wasGeneratedBy {ctx:'consent'}]->(p2)
-        MATCH (p2)-[:wasControlledBy {ctx:'owner'}]->(:Agent)
-        WHERE wg1.TG > u.TU
-      }
-      OR
-      // (A) c is the last consent and was not revoked on/before the use time
-      (
-        NOT EXISTS {
-          MATCH (p3:Process)-[:used {ctx:'consent'}]->(c)
-          MATCH (:Artifact)-[:wasGeneratedBy {ctx:'consent'}]->(p3)
-        }
-        AND (
-          NOT EXISTS { MATCH (:Process)-[rv:used {ctx:'revokeConsent'}]->(c) WHERE rv.TU <= u.TU }
-          OR  EXISTS  { MATCH (:Process)-[rv:used {ctx:'revokeConsent'}]->(c) WHERE rv.TU >  u.TU }
-        )
-      )
-    )
-}
-
-RETURN DISTINCT p.name AS P, d.name AS D, p.action AS PU, u.TU AS T
-ORDER BY T;
-
-
+            // 1) candidate uses (exclude synthetic)
+            MATCH (p:Process)-[u:used]->(d:Artifact)
+            WHERE p.action IS NOT NULL
+              AND coalesce(p.synthetic,false) = false
+              AND coalesce(u.synthetic,false) = false
+            
+            // 2) single personal root (materialized beforehand)
+            MATCH (d)-[:hasPersonalRoot]->(dp:Artifact {type:'personal_data'})
+            
+            // 2.5) apply default allow-list: GLOBAL + DATA-SPECIFIC
+            OPTIONAL MATCH (mc:Artifact {name:'mandatory_consent'})
+            WITH p,u,d,dp,defaults, mc, coalesce(dp.dp_key, dp.purposes_key) AS prop
+            WITH p,u,d,dp,defaults, mc, prop,
+                 CASE WHEN mc IS NULL THEN [] ELSE coalesce(mc[prop], []) END AS dpDefaults
+            WITH p,u,d,dp,defaults, mc, dpDefaults,
+                 (p.action IN defaults) AS isGloballyAllowed
+            WHERE NOT isGloballyAllowed
+             // only global defaults are unconditional
+            
+            
+            // 3) violation if NO valid consent for (dp, p.action) before u.TU,
+            //    respecting revocations and later consents
+            WITH p,u,d,dp, coalesce(dp.dp_key, dp.purposes_key) AS prop
+            WHERE NOT EXISTS {
+              // a consent artifact c granting p.action for dp
+              MATCH (c:Artifact)-[wg:wasGeneratedBy {ctx:'consent'}]->(pGen:Process)
+              MATCH (pGen)-[:wasControlledBy {ctx:'owner'}]->(:Agent)
+              WHERE wg.TG < u.TU                                       // consent must predate the use
+                AND (
+                              p.action IN coalesce(c[prop], [])
+                              OR p.action IN dpDefaults
+                            )
+            
+                // validity condition (same as your Prolog logic)
+                AND (
+                  // (B) there exists a "next consent" after the use -> then the pre-use consent c is valid window
+                  EXISTS {
+                    MATCH (p2:Process)-[:used {ctx:'consent'}]->(c)
+                    MATCH (:Artifact)-[wg1:wasGeneratedBy {ctx:'consent'}]->(p2)
+                    MATCH (p2)-[:wasControlledBy {ctx:'owner'}]->(:Agent)
+                    WHERE wg1.TG > u.TU
+                  }
+                  OR
+                  // (A) c is the last consent and was not revoked on/before the use time
+                  (
+                    NOT EXISTS {
+                      MATCH (p3:Process)-[:used {ctx:'consent'}]->(c)
+                      MATCH (:Artifact)-[:wasGeneratedBy {ctx:'consent'}]->(p3)
+                    }
+                    AND (
+                      NOT EXISTS { MATCH (:Process)-[rv:used {ctx:'revokeConsent'}]->(c) WHERE rv.TU <= u.TU }
+                      OR  EXISTS  { MATCH (:Process)-[rv:used {ctx:'revokeConsent'}]->(c) WHERE rv.TU >  u.TU }
+                    )
+                  )
+                )
+            }
+            
+            RETURN DISTINCT p.name AS P, d.name AS D, p.action AS PU, u.TU AS T
+            ORDER BY T;
 """;
 
 
@@ -161,15 +151,7 @@ MATCH (p:Process)-[u:used]->(d:Artifact)
 WHERE p.action <> 'delete'
   AND u.TU <= cutoff
 
-CALL {
-  WITH d
-  MATCH pth = allShortestPaths( (d)-[:wasDerivedFrom*0..]->(dp:Artifact {type:'personal_data'}) )
-  WITH dp, length(pth) AS L, coalesce(dp.personal_seq, 9223372036854775807) AS seq
-  ORDER BY L ASC, seq ASC
-  LIMIT 1
-  RETURN dp
-}
-
+MATCH (d)-[:hasPersonalRoot]->(dp:Artifact {type:'personal_data'})
 WITH d, u, dp
 WHERE NOT (
   EXISTS {

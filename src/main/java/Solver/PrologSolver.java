@@ -87,6 +87,7 @@ public class PrologSolver implements SolverInterface {
             new Query("style_check(-discontiguous)").hasSolution();
             new Query("style_check(-singleton)").hasSolution();
             new Query("( current_prolog_flag(verbose_load, _) -> set_prolog_flag(verbose_load, false) ; true )").hasSolution();
+            new Query("set_prolog_flag(optimise,true)").hasSolution();
         } catch (Throwable ignored) {
             // If any of these aren’t supported, just continue.
         }
@@ -110,7 +111,12 @@ public class PrologSolver implements SolverInterface {
         printPrologTimeBlock();
 
         loadPrologFile(this.provenanceGraphPath);
+        // Load diagnostics and run them only when we’re benchmarking LEGAL alone:
+        try {
+            loadResource("/RGPD/diagnostics.pl");
+        } catch (Throwable ignored) {}
         new Query("abolish_all_tables").hasSolution();
+
 
         if (PROLOG_TRACING_ENABLED_FOR_DEBUG) {
 
@@ -148,6 +154,11 @@ public class PrologSolver implements SolverInterface {
                     loadResource("/RGPD/" + ruleFile);
                     if (issueType == Issue.IssueType.LEGAL &&
                             prologDefaultsLoggedForGraph.add(this.provenanceGraphPath)) {
+                        try {
+                            // run once per graph if you like; or guard with a boolean
+                            //new Query("diagnostics:diag_legal").hasSolution();
+                            //new Query("diagnostics:pd_stats").hasSolution();
+                        } catch (Throwable ignored) {}
                         try {
                             // Compute list of default purposes without printing inside Prolog
                             Map<String, Term> sol =
